@@ -23,10 +23,19 @@ func NewProviderFromConfig(cfg LLMConfig) Provider {
 			baseURL = "https://api.openai.com/v1"
 		}
 	}
+
+	// Some OpenAI-compatible gateways incorrectly return
+	// `Content-Encoding: gzip` for non-gzipped responses. Go's default
+	// transport auto-decompresses gzip and then fails with "gzip: invalid header".
+	// Disabling transparent compression and explicitly requesting identity
+	// encoding makes these gateways work reliably.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DisableCompression = true
+
 	return &openAICompatProvider{
 		model:   cfg.Model,
 		apiKey:  cfg.APIKey,
 		baseURL: baseURL,
-		client:  &http.Client{},
+		client:  &http.Client{Transport: transport},
 	}
 }

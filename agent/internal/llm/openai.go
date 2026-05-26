@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type oaiMessage struct {
@@ -81,6 +82,9 @@ func (p *openAICompatProvider) Chat(ctx context.Context, req ChatRequest) (ChatR
 					})
 				}
 				msg.ToolCalls = tcs
+				if m.Content != "" {
+					msg.Content = m.Content
+				}
 			} else {
 				msg.Content = m.Content
 			}
@@ -105,11 +109,14 @@ func (p *openAICompatProvider) Chat(ctx context.Context, req ChatRequest) (ChatR
 	body := oaiRequest{Model: p.model, Messages: msgs, Tools: oaiTools}
 	bodyBytes, _ := json.Marshal(body)
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(bodyBytes))
+	baseURL := strings.TrimRight(p.baseURL, "/")
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(bodyBytes))
 	if err != nil {
 		return ChatResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("Accept-Encoding", "identity")
 	if p.apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
@@ -123,6 +130,9 @@ func (p *openAICompatProvider) Chat(ctx context.Context, req ChatRequest) (ChatR
 	respBytes, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		return ChatResponse{}, err
+	}
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return ChatResponse{}, fmt.Errorf("API returned %s: %s", httpResp.Status, string(respBytes))
 	}
 
 	var oaiResp oaiResponse
