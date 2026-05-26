@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -9,39 +9,49 @@
   padding: 0;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
 body {
   font-family: 'Inter', sans-serif;
-  background: #191919;
-  color: #e6e6e5;
+  background: #0b0d10;
+  color: #eef2f8;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
   user-select: none;
 }
 
-/* Custom scrollbar — Notion style */
+::selection {
+  background: rgba(124, 92, 255, 0.32);
+  color: #ffffff;
+}
+
+/* Codex-like low-noise scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(148, 163, 184, 0.32);
 }
 
-/* Notion-style focus ring */
 *:focus-visible {
-  outline: 2px solid #2383e2;
+  outline: 2px solid rgba(124, 92, 255, 0.9);
   outline-offset: 2px;
 }
 
-/* Drag region for frameless window */
 .drag-region {
   -webkit-app-region: drag;
 }
@@ -49,24 +59,28 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* Syntax highlight override */
-pre code {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 12px;
+pre,
+code,
+kbd,
+samp {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
 }
 
-/* Markdown prose */
+textarea {
+  user-select: text;
+}
+
 .prose-notion {
-  @apply text-notion-text leading-relaxed;
+  @apply text-codex-text leading-relaxed;
 }
 .prose-notion p {
   @apply mb-2;
 }
 .prose-notion code {
-  @apply bg-notion-panel px-1.5 py-0.5 rounded text-sm font-mono text-notion-text;
+  @apply bg-codex-bg px-1.5 py-0.5 rounded-md text-sm font-mono text-codex-text border border-codex-border;
 }
 .prose-notion pre {
-  @apply bg-notion-panel rounded-notion p-4 overflow-x-auto mb-3;
+  @apply bg-codex-bg rounded-2xl p-4 overflow-x-auto mb-3 border border-codex-border;
 }
 .prose-notion h1, .prose-notion h2, .prose-notion h3 {
   @apply font-semibold mb-2 mt-4;
@@ -78,5 +92,5 @@ pre code {
   @apply mb-0.5;
 }
 .prose-notion a {
-  @apply text-notion-accent hover:underline;
+  @apply text-codex-blue hover:underline;
 }

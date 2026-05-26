@@ -6,9 +6,9 @@ export default {
     extend: {
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'SFMono-Regular', 'Consolas', 'monospace'],
       },
       colors: {
-        // Notion dark palette
         notion: {
           bg:        '#191919',
           surface:   '#1e1e1e',
@@ -23,9 +23,35 @@ export default {
           hover:     'rgba(255,255,255,0.05)',
           selected:  'rgba(35,131,226,0.12)',
         },
+        codex: {
+          bg:        '#0b0d10',
+          sidebar:   '#101318',
+          panel:     '#151922',
+          card:      '#191f2a',
+          card2:     '#11161d',
+          border:    'rgba(148,163,184,0.16)',
+          border2:   'rgba(148,163,184,0.24)',
+          text:      '#eef2f8',
+          muted:     '#8d98a8',
+          faint:     '#5f6b7a',
+          accent:    '#7c5cff',
+          accent2:   '#21c7a8',
+          blue:      '#5aa7ff',
+          green:     '#4ade80',
+          red:       '#fb7185',
+          amber:     '#fbbf24',
+        },
+      },
+      boxShadow: {
+        codex: '0 24px 80px rgba(0,0,0,0.42)',
+        glow: '0 0 48px rgba(124,92,255,0.18)',
       },
       borderRadius: {
         notion: '8px',
+        codex: '16px',
+      },
+      backgroundImage: {
+        'codex-radial': 'radial-gradient(circle at 50% -10%, rgba(124,92,255,0.20), transparent 34%), radial-gradient(circle at 85% 20%, rgba(33,199,168,0.10), transparent 26%)',
       },
     },
   },
