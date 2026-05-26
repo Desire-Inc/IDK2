@@ -1,143 +1,190 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
-const (
-	anthropicAPIURL = "https://api.anthropic.com/v1/messages"
-	anthropicVersion = "2023-06-01"
-)
+const anthropicBaseURL = "https://api.anthropic.com/v1/messages"
+const anthropicVersion  = "2023-06-01"
+const defaultClaudeModel = "claude-sonnet-4-5"
 
-// AnthropicProvider implements Provider for Anthropic Claude models
-type AnthropicProvider struct {
+type anthropicProvider struct {
 	apiKey string
 	model  string
 	client *http.Client
 }
 
-func NewAnthropic(apiKey, model string) *AnthropicProvider {
+func NewAnthropic(apiKey, model string) Provider {
 	if model == "" {
-		model = "claude-sonnet-4-5"
+		model = defaultClaudeModel
 	}
-	return &AnthropicProvider{apiKey: apiKey, model: model, client: &http.Client{}}
+	return &anthropicProvider{apiKey: apiKey, model: model, client: &http.Client{}}
 }
 
-func (a *AnthropicProvider) Name() string  { return "anthropic" }
-func (a *AnthropicProvider) Model() string { return a.model }
+func (a *anthropicProvider) Name() string  { return "anthropic" }
+func (a *anthropicProvider) Model() string { return a.model }
 
-type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
-}
-
-type anthropicMessage struct {
-	Role    string      `json:"role"`
-	Content interface{} `json:"content"` // string or []block
-}
-
-type anthropicTool struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"input_schema"`
-}
-
-type anthropicResponse struct {
-	Content []struct {
-		Type  string          `json:"type"`
-		Text  string          `json:"text,omitempty"`
-		ID    string          `json:"id,omitempty"`
-		Name  string          `json:"name,omitempty"`
-		Input json.RawMessage `json:"input,omitempty"`
-	} `json:"content"`
-	StopReason string `json:"stop_reason"`
-}
-
-func (a *AnthropicProvider) Complete(ctx context.Context, messages []Message, tools []ToolDefinition) (*Response, error) {
-	var systemPrompt string
-	var anthropicMsgs []anthropicMessage
-
-	for _, m := range messages {
-		if m.Role == RoleSystem {
-			systemPrompt = m.Content
-			continue
-		}
-		anthropic Msgs = append(anthropicMsgs, anthropicMessage{Role: m.Role, Content: m.Content})
+func (a *anthropicProvider) Chat(ctx context.Context, cfg Config, messages []Message, tools []ToolDefinition) (<-chan Delta, error) {
+	payload := map[string]interface{}{
+		"model":      a.model,
+		"max_tokens": cfg.MaxTokens,
+		"stream":     true,
+		"messages":   convertMessagesAnthropic(messages),
+	}
+	if cfg.SystemPrompt != "" {
+		payload["system"] = cfg.SystemPrompt
+	}
+	if len(tools) > 0 {
+		payload["tools"] = convertToolsAnthropic(tools)
 	}
 
-	var anthropicTools []anthropicTool
-	for _, t := range tools {
-		anthropic Tools = append(anthropicTools, anthropicTool{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.Parameters,
-		})
-	}
-
-	req := anthropicRequest{
-		Model:     a.model,
-		MaxTokens: 8192,
-		System:    systemPrompt,
-		Messages:  anthropicMsgs,
-		Tools:     anthropicTools,
-	}
-
-	body, err := json.Marshal(req)
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicAPIURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", anthropicBaseURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("x-api-key", a.apiKey)
-	httpReq.Header.Set("anthropic-version", anthropicVersion)
-	httpReq.Header.Set("content-type", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", a.apiKey)
+	req.Header.Set("anthropic-version", anthropicVersion)
+	req.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14")
 
-	resp, err := a.client.Do(httpReq)
+	resp, err := a.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("anthropic API %d: %s", resp.StatusCode, respBody)
+	if resp.StatusCode != 200 {
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("anthropic: status %d: %s", resp.StatusCode, string(b))
 	}
 
-	var ar anthropicResponse
-	if err := json.Unmarshal(respBody, &ar); err != nil {
-		return nil, err
-	}
+	ch := make(chan Delta, 64)
+	go func() {
+		defer close(ch)
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
 
-	result := &Response{Done: ar.StopReason == "end_turn"}
-	for _, block := range ar.Content {
-		switch block.Type {
-		case "text":
-			result.Content += block.Text
-		case "tool_use":
-			var args map[string]interface{}
-			if block.Input != nil {
-				_ = json.Unmarshal(block.Input, &args)
+		var currentToolID, currentToolName, currentToolArgs string
+		inTool := false
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
 			}
-			result.ToolCalls = append(result.ToolCalls, ToolCall{
-				ID:        block.ID,
-				Name:      block.Name,
-				Arguments: args,
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				break
+			}
+
+			var evt map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &evt); err != nil {
+				continue
+			}
+
+			switch evt["type"] {
+			case "content_block_start":
+				if cb, ok := evt["content_block"].(map[string]interface{}); ok {
+					if cb["type"] == "tool_use" {
+						currentToolID   = str(cb["id"])
+						currentToolName = str(cb["name"])
+						currentToolArgs = ""
+						inTool = true
+					}
+				}
+			case "content_block_delta":
+				if delta, ok := evt["delta"].(map[string]interface{}); ok {
+					switch delta["type"] {
+					case "text_delta":
+						ch <- Delta{Type: DeltaText, Text: str(delta["text"])}
+					case "thinking_delta":
+						ch <- Delta{Type: DeltaThinking, Text: str(delta["thinking"])}
+					case "input_json_delta":
+						currentToolArgs += str(delta["partial_json"])
+					}
+				}
+			case "content_block_stop":
+				if inTool {
+					ch <- Delta{Type: DeltaToolCall, ToolCall: &ToolCall{
+						ID:        currentToolID,
+						Name:      currentToolName,
+						Arguments: currentToolArgs,
+					}}
+					inTool = false
+				}
+			case "message_stop":
+				ch <- Delta{Type: DeltaDone}
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			ch <- Delta{Error: err}
+		}
+	}()
+	return ch, nil
+}
+
+// ---- helpers ----------------------------------------------------------------
+
+func str(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
+}
+
+func convertMessagesAnthropic(msgs []Message) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(msgs))
+	for _, m := range msgs {
+		switch m.Role {
+		case RoleUser:
+			out = append(out, map[string]interface{}{"role": "user", "content": m.Content})
+		case RoleAssistant:
+			if len(m.ToolCalls) > 0 {
+				content := []map[string]interface{}{}
+				if m.Content != "" {
+					content = append(content, map[string]interface{}{"type": "text", "text": m.Content})
+				}
+				for _, tc := range m.ToolCalls {
+					var args map[string]interface{}
+					_ = json.Unmarshal([]byte(tc.Arguments), &args)
+					content = append(content, map[string]interface{}{
+						"type": "tool_use", "id": tc.ID, "name": tc.Name, "input": args,
+					})
+				}
+				out = append(out, map[string]interface{}{"role": "assistant", "content": content})
+			} else {
+				out = append(out, map[string]interface{}{"role": "assistant", "content": m.Content})
+			}
+		case RoleTool:
+			out = append(out, map[string]interface{}{
+				"role": "user",
+				"content": []map[string]interface{}"type": "tool_result", "tool_use_id": m.ToolCallID, "content": m.Content,
 			})
 		}
 	}
-	return result, nil
+	return out
+}
+
+func convertToolsAnthropic(tools []ToolDefinition) []map[string]interface{} {
+	out := make([]map[string]interface{}, len(tools))
+	for i, t := range tools {
+		out[i] = map[string]interface{}{
+			"name":         t.Name,
+			"description":  t.Description,
+			"input_schema": t.Parameters,
+		}
+	}
+	return out
 }

@@ -2,61 +2,75 @@ package llm
 
 import "context"
 
-// Role constants
-const (
-	RoleUser      = "user"
-	RoleAssistant = "assistant"
-	RoleTool      = "tool"
-	RoleSystem    = "system"
-)
-
-// Message is a single LLM conversation message
-type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-}
-
-// ToolCall is a request from the LLM to call a tool
-type ToolCall struct {
-	ID        string                 `json:"id"`
-	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"arguments"`
-}
-
-// ToolDefinition describes a tool available to the LLM
-type ToolDefinition struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
-}
-
-// Response is the LLM's full response
-type Response struct {
-	Content   string     `json:"content"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-	Done      bool       `json:"done"`
-}
-
-// Provider is the interface all LLM adapters must implement
+// Provider is the interface all LLM adapters must implement.
 type Provider interface {
-	Complete(ctx context.Context, messages []Message, tools []ToolDefinition) (*Response, error)
+	// Chat sends a list of messages and streams back tokens/tool calls.
+	Chat(ctx context.Context, cfg Config, messages []Message, tools []ToolDefinition) (<-chan Delta, error)
+	// Name returns a human-readable name for the provider.
 	Name() string
+	// Model returns the active model name.
 	Model() string
 }
 
-// Config holds LLM provider configuration
-type Config struct {
-	Provider string `json:"provider"` // "anthropic", "openai", "ollama"
-	Model    string `json:"model"`
-	APIKey   string `json:"api_key,omitempty"`
-	BaseURL  string `json:"base_url,omitempty"`
+// ----- Message ---------------------------------------------------------------
+
+type Role string
+
+const (
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+	RoleTool      Role = "tool"
+)
+
+type Message struct {
+	Role       Role
+	Content    string
+	ToolCalls  []ToolCall
+	ToolCallID string // only for role=tool responses
 }
 
-// DefaultConfigs holds default configurations per provider
-var DefaultConfigs = map[string]Config{
-	"anthropic": {Provider: "anthropic", Model: "claude-sonnet-4-5"},
-	"openai":    {Provider: "openai", Model: "gpt-4o"},
-	"ollama":    {Provider: "ollama", Model: "llama3.1", BaseURL: "http://localhost:11434"},
+// ----- Tool definitions ------------------------------------------------------
+
+type ToolDefinition struct {
+	Name        string
+	Description string
+	Parameters  map[string]interface{} // JSON Schema object
+}
+
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments string // raw JSON
+}
+
+// ----- Streaming delta -------------------------------------------------------
+
+type DeltaType string
+
+const (
+	DeltaText      DeltaType = "text"
+	DeltaToolCall  DeltaType = "tool_call"
+	DeltaThinking  DeltaType = "thinking"
+	DeltaDone      DeltaType = "done"
+)
+
+type Delta struct {
+	Type     DeltaType
+	Text     string
+	ToolCall *ToolCall
+	Error    error
+}
+
+// ----- Config ----------------------------------------------------------------
+
+type Config struct {
+	Temperature float64
+	MaxTokens   int
+	SystemPrompt string
+}
+
+var DefaultConfig = Config{
+	Temperature:  0.7,
+	MaxTokens:    8192,
+	SystemPrompt: "",
 }
