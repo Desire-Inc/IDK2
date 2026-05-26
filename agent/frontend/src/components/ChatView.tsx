@@ -1,9 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Send } from 'lucide-react'
 import { useAgentStore } from '../store'
 import { useAgent } from '../hooks/useAgent'
 import AgentStream from './AgentStream'
-import { useState } from 'react'
 
 export default function ChatView() {
   const activeThreadId = useAgentStore((s) => s.activeThreadId)
@@ -15,7 +14,6 @@ export default function ChatView() {
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom on new events
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [events])
