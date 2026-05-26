@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useAgentStore } from '../store'
 
 const wailsRuntime = () => (window as any).runtime as {
-  EventsOn: (event: string, cb: (data: any) => void) => void
+  EventsOn: (event: string, cb: (data: any) => void) => (() => void) | void
   EventsOff: (event: string) => void
 } | undefined
 
@@ -17,52 +17,61 @@ const App = () => (window as any)?.go?.app?.App as {
   GetConfig: () => Promise<any>
 } | undefined
 
+let eventsRegistered = false
+let initialLoadStarted = false
+
+async function refreshThreads() {
+  const threads = await App()?.GetThreads()
+  if (threads) useAgentStore.getState().setThreads(threads)
+}
+
+function registerAgentEventsOnce() {
+  if (eventsRegistered) return
+  const runtime = wailsRuntime()
+  if (!runtime) return
+
+  eventsRegistered = true
+  runtime.EventsOn('agent:event', (payload: any) => {
+    const { thread_id, type, content, data } = payload
+    const store = useAgentStore.getState()
+
+    if (type === 'approval_required') {
+      store.addEvent(thread_id, { type, content, data })
+      store.setPendingApproval(data)
+      return
+    }
+
+    if (type === 'title_updated') {
+      refreshThreads().catch(console.error)
+      return
+    }
+
+    store.addEvent(thread_id, { type, content, data })
+
+    if (type === 'done' || type === 'cancelled' || type === 'error') {
+      store.setRunning(false)
+      refreshThreads().catch(console.error)
+    }
+  })
+}
+
+function loadInitialStateOnce() {
+  if (initialLoadStarted) return
+  initialLoadStarted = true
+  App()?.GetThreads().then((threads) => {
+    if (threads) useAgentStore.getState().setThreads(threads)
+  }).catch(console.error)
+  App()?.GetConfig().then((cfg) => {
+    if (cfg) useAgentStore.getState().setLLMConfig(cfg)
+  }).catch(console.error)
+}
+
 export function useAgent() {
-  const addEvent      = useAgentStore((s) => s.addEvent)
-  const setThreads    = useAgentStore((s) => s.setThreads)
-  const setRunning    = useAgentStore((s) => s.setRunning)
-  const setPending    = useAgentStore((s) => s.setPendingApproval)
-  const activeId      = useAgentStore((s) => s.activeThreadId)
-  const setActive     = useAgentStore((s) => s.setActiveThread)
-  const setLLMConfig  = useAgentStore((s) => s.setLLMConfig)
-
-  const registered = useRef(false)
-
-  const refreshThreads = async () => {
-    const threads = await App()?.GetThreads()
-    if (threads) setThreads(threads)
-  }
+  const activeId = useAgentStore((s) => s.activeThreadId)
 
   useEffect(() => {
-    App()?.GetThreads().then(setThreads).catch(console.error)
-    App()?.GetConfig().then((cfg) => cfg && setLLMConfig(cfg)).catch(console.error)
-
-    if (registered.current) return
-    registered.current = true
-
-    wailsRuntime()?.EventsOn('agent:event', (payload: any) => {
-      const { thread_id, type, content, data } = payload
-      if (type === 'approval_required') {
-        addEvent(thread_id, { type, content, data })
-        setPending(data)
-        return
-      }
-      if (type === 'title_updated') {
-        refreshThreads().catch(console.error)
-        return
-      }
-      addEvent(thread_id, { type, content, data })
-      if (type === 'done' || type === 'cancelled' || type === 'error') {
-        setRunning(false)
-        refreshThreads().catch(console.error)
-      }
-    })
-
-    return () => {
-      wailsRuntime()?.EventsOff('agent:event')
-      registered.current = false
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadInitialStateOnce()
+    registerAgentEventsOnce()
   }, [])
 
   const newThread = async () => {
@@ -70,8 +79,8 @@ export function useAgent() {
     if (!app) return
     const id = await app.NewThread('Nova conversa')
     const threads = await app.GetThreads()
-    setThreads(threads)
-    setActive(id)
+    useAgentStore.getState().setThreads(threads)
+    useAgentStore.getState().setActiveThread(id)
   }
 
   const deleteThread = async (id: string) => {
@@ -79,38 +88,44 @@ export function useAgent() {
     if (!app) return
     await app.DeleteThread(id)
     const threads = await app.GetThreads()
-    setThreads(threads)
-    if (activeId === id) setActive(threads[0]?.id ?? null)
+    const store = useAgentStore.getState()
+    store.setThreads(threads)
+    if (store.activeThreadId === id) store.setActiveThread(threads[0]?.id ?? null)
   }
 
   const sendMessage = async (message: string) => {
-    if (!activeId) return
+    const threadId = useAgentStore.getState().activeThreadId ?? activeId
+    if (!threadId) return
     const app = App()
     if (!app) return
-    setRunning(true)
-    addEvent(activeId, { type: 'user', content: message, data: null })
+
+    const store = useAgentStore.getState()
+    store.setRunning(true)
+    store.addEvent(threadId, { type: 'user', content: message, data: null })
+
     try {
-      await app.SendMessage(activeId, message)
+      await app.SendMessage(threadId, message)
     } catch (e) {
-      addEvent(activeId, { type: 'error', content: String(e), data: null })
-      setRunning(false)
+      store.addEvent(threadId, { type: 'error', content: String(e), data: null })
+      store.setRunning(false)
     }
   }
 
   const stopRun = async () => {
-    if (!activeId) return
-    await App()?.StopRun(activeId)
-    setRunning(false)
+    const threadId = useAgentStore.getState().activeThreadId ?? activeId
+    if (!threadId) return
+    await App()?.StopRun(threadId)
+    useAgentStore.getState().setRunning(false)
   }
 
   const approveAction = async (approved: boolean) => {
-    setPending(null)
+    useAgentStore.getState().setPendingApproval(null)
     await App()?.ApproveAction(approved)
   }
 
   const saveConfig = async (config: any) => {
     await App()?.SaveConfig(config)
-    setLLMConfig(config)
+    useAgentStore.getState().setLLMConfig(config)
   }
 
   return { newThread, deleteThread, sendMessage, stopRun, approveAction, saveConfig }
