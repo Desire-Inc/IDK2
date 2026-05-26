@@ -21,12 +21,9 @@ export default function SettingsModal() {
   const setShowSettings = useAgentStore((s) => s.setShowSettings)
   const llmConfig = useAgentStore((s) => s.llmConfig)
   const { saveConfig } = useAgent()
-
   const [config, setConfig] = useState<LLMConfig>(llmConfig)
 
-  useEffect(() => {
-    setConfig(llmConfig)
-  }, [llmConfig])
+  useEffect(() => { setConfig(llmConfig) }, [llmConfig])
 
   const models = PROVIDER_MODELS[config.provider] ?? []
   const showBaseURL = config.provider === 'openai_compatible' || config.provider === 'ollama'
@@ -56,9 +53,9 @@ export default function SettingsModal() {
         onClick={() => setShowSettings(false)}
       >
         <motion.div
-          initial= scale: 0.95, opacity: 0 
-          animate= scale: 1, opacity: 1 
-          exit= scale: 0.95, opacity: 0 
+          initial= opacity: 0, scale: 0.95, y: 8 
+          animate= opacity: 1, scale: 1, y: 0 
+          exit= opacity: 0, scale: 0.95, y: 8 
           transition= duration: 0.15 
           className="bg-notion-surface rounded-notion shadow-2xl border border-notion-border w-[480px] p-6"
           onClick={(e) => e.stopPropagation()}
@@ -107,7 +104,7 @@ export default function SettingsModal() {
             </datalist>
           </label>
 
-          {/* Base URL (OpenAI-compatible / Ollama) */}
+          {/* Base URL */}
           {showBaseURL && (
             <label className="block mb-4">
               <div className="flex items-center gap-1.5 text-xs text-notion-muted mb-1.5">

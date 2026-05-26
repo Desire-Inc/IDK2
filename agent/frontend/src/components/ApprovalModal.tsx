@@ -18,10 +18,10 @@ export default function ApprovalModal() {
         className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
       >
         <motion.div
-          initial= opacity: 0, scale: 0.95, y: 16 
+          initial= opacity: 0, scale: 0.95, y: 8 
           animate= opacity: 1, scale: 1, y: 0 
-          exit= opacity: 0, scale: 0.95, y: 16 
-          transition= type: 'spring', stiffness: 380, damping: 30 
+          exit= opacity: 0, scale: 0.95, y: 8 
+          transition= duration: 0.15 
           className="bg-notion-surface rounded-notion shadow-2xl border border-notion-border w-[440px] p-6"
         >
           <div className="flex items-center gap-3 mb-4">
