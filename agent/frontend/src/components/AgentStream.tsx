@@ -5,6 +5,10 @@ import remarkGfm from 'remark-gfm'
 import { ChatEvent, ToolCallData, ToolResultData } from '../types'
 import clsx from 'clsx'
 
+const fadeInitial = { opacity: 0, y: 4 }
+const fadeAnimate = { opacity: 1, y: 0 }
+const fadeTransition = { duration: 0.12 }
+
 interface Props {
   chatEvent: ChatEvent
 }
@@ -14,9 +18,9 @@ export default function AgentStream({ chatEvent }: Props) {
 
   return (
     <motion.div
-      initial= opacity: 0, y: 4 
-      animate= opacity: 1, y: 0 
-      transition= duration: 0.15 
+      initial={fadeInitial}
+      animate={fadeAnimate}
+      transition={fadeTransition}
       className="group"
     >
       {event.type === 'thinking' && (

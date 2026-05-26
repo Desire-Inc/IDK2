@@ -17,6 +17,12 @@ const PROVIDER_DEFAULT_URLS: Record<string, string> = {
   ollama: 'http://localhost:11434',
 }
 
+const overlayInitial = { opacity: 0 }
+const overlayAnimate = { opacity: 1 }
+const modalInitial = { opacity: 0, scale: 0.96, y: 8 }
+const modalAnimate = { opacity: 1, scale: 1, y: 0 }
+const modalTransition = { duration: 0.18, ease: 'easeOut' }
+
 export default function SettingsModal() {
   const setShowSettings = useAgentStore((s) => s.setShowSettings)
   const llmConfig = useAgentStore((s) => s.llmConfig)
@@ -46,17 +52,17 @@ export default function SettingsModal() {
   return (
     <AnimatePresence>
       <motion.div
-        initial= opacity: 0 
-        animate= opacity: 1 
-        exit= opacity: 0 
+        initial={overlayInitial}
+        animate={overlayAnimate}
+        exit={overlayInitial}
         className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
         onClick={() => setShowSettings(false)}
       >
         <motion.div
-          initial= opacity: 0, scale: 0.95, y: 8 
-          animate= opacity: 1, scale: 1, y: 0 
-          exit= opacity: 0, scale: 0.95, y: 8 
-          transition= duration: 0.18, ease: 'easeOut' 
+          initial={modalInitial}
+          animate={modalAnimate}
+          exit={modalInitial}
+          transition={modalTransition}
           className="bg-notion-surface rounded-notion shadow-2xl border border-notion-border w-[480px] p-6"
           onClick={(e) => e.stopPropagation()}
         >

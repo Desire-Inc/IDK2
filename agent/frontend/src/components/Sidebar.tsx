@@ -5,6 +5,10 @@ import { useAgentStore } from '../store'
 import { useAgent } from '../hooks/useAgent'
 import clsx from 'clsx'
 
+const itemInitial = { opacity: 0, x: -6 }
+const itemAnimate = { opacity: 1, x: 0 }
+const itemTransition = { duration: 0.15 }
+
 export default function Sidebar() {
   const threads = useAgentStore((s) => s.threads)
   const activeThreadId = useAgentStore((s) => s.activeThreadId)
@@ -39,10 +43,10 @@ export default function Sidebar() {
           {threads.map((thread) => (
             <motion.div
               key={thread.id}
-              initial= opacity: 0, x: -6 
-              animate= opacity: 1, x: 0 
-              exit= opacity: 0, x: -6 
-              transition= duration: 0.15 
+              initial={itemInitial}
+              animate={itemAnimate}
+              exit={itemInitial}
+              transition={itemTransition}
               className={clsx(
                 'group flex items-center gap-2 px-2.5 py-1.5 rounded-notion cursor-pointer text-sm mb-0.5 transition-colors',
                 activeThreadId === thread.id
