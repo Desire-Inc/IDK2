@@ -50,16 +50,26 @@ func NewApp() *App {
 	}
 }
 
+// Startup is called by Wails when the app starts.
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
-	// Load API key from environment
-	if a.llmConfig.APIKey == "" {
-		for _, env := range []string{"OPENGATEWAY_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"} {
-			if v := os.Getenv(env); v != "" {
-				a.llmConfig.APIKey = v
-				break
-			}
+	for _, env := range []string{"OPENGATEWAY_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"} {
+		if v := os.Getenv(env); v != "" {
+			a.llmConfig.APIKey = v
+			break
 		}
+	}
+}
+
+// Shutdown is called by Wails when the app closes.
+func (a *App) Shutdown(ctx context.Context) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		a.cancel()
+	}
+	if a.mem != nil && a.mem.db != nil {
+		_ = a.mem.db.Close()
 	}
 }
 
@@ -124,7 +134,6 @@ func (a *App) RunAgent(threadID, input string) error {
 		},
 	}
 
-	// Save user message
 	_ = a.mem.AppendMessage(threadID, Message{Role: "user", Content: input})
 
 	err := Run(ctx, cfg, history, input)
