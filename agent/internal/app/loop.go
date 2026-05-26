@@ -4,217 +4,126 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/Desire-Inc/notion-agent/internal/llm"
 	"github.com/Desire-Inc/notion-agent/internal/tools"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// LoopConfig configures a single agent run.
-type LoopConfig struct {
-	MaxIterations int
-	LLMProvider   llm.Provider
-	Registry      *tools.Registry
-	EventChan     chan<- Event
-	ApprovalFn    func(ApprovalData) bool
-}
+const systemPrompt = `You are an autonomous AI agent — a powerful coding and productivity assistant similar to Claude or Codex.
 
-const systemPrompt = `Você é um agente de IA especializado em controlar workspaces do Notion.
-Seu objetivo é entender a tarefa do usuário e executá-la usando as ferramentas disponíveis.
+You can:
+- Write, read, edit and execute code in any language
+- Create, read, update and delete files on the local filesystem
+- Run terminal commands and scripts
+- Search the web and browse URLs
+- Manage Notion workspaces: create pages, databases, query data
+- Interact with Git repositories
+- Plan and execute multi-step tasks autonomously
 
-Regras:
-- Sempre explique brevemente o que vai fazer antes de chamar uma ferramenta.
-- Depois de cada ferramenta, analise o resultado e decida o próximo passo.
-- Se precisar de informações que não tem, use notion_search ou notion_page_view primeiro.
-- Quando concluir a tarefa, envie uma mensagem final resumindo o que foi feito.
-- Responda sempre em português.
-`
+You think step by step. When given a task, you break it down, use the available tools, and complete it fully.
+Always respond in the same language the user writes in.
+Be concise but complete. Show your work when it's helpful.`
 
-// Run executes the ReAct loop for a single user input.
-func Run(ctx context.Context, cfg LoopConfig, history []Message, userInput string) error {
-	if cfg.MaxIterations == 0 {
-		cfg.MaxIterations = 20
-	}
-
-	// Build LLM message history
-	var msgs []llm.Message
-	for _, m := range history {
-		msgs = append(msgs, llm.Message{
-			Role:       llm.Role(m.Role),
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
-		})
-	}
-	msgs = append(msgs, llm.Message{
-		Role:    llm.RoleUser,
-		Content: userInput,
-	})
-
-	cfgLLM := llm.Config{
-		Temperature:  0.7,
-		MaxTokens:    8192,
-		SystemPrompt: systemPrompt,
-	}
-
-	emit := func(e Event) {
-		e.Timestamp = time.Now().UnixMilli()
-		select {
-		case cfg.EventChan <- e:
-		default:
+func (a *App) runLoop(ctx context.Context, threadID string, userMsg string) {
+	emit := func(eventType, content string, data any) {
+		payload := map[string]any{
+			"thread_id": threadID,
+			"type":      eventType,
+			"content":   content,
+			"data":       data,
 		}
+		runtime.EventsEmit(ctx, "agent:event", payload)
 	}
 
-	for i := 0; i < cfg.MaxIterations; i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	// Append user message to memory
+	if err := a.mem.AppendMessage(threadID, Message{Role: "user", Content: userMsg}); err != nil {
+		emit("error", fmt.Sprintf("memory error: %v", err), nil)
+		return
+	}
+
+	for iteration := 0; iteration < 20; iteration++ {
+		// Build message history
+		history, err := a.mem.GetMessages(threadID)
+		if err != nil {
+			emit("error", fmt.Sprintf("memory error: %v", err), nil)
+			return
+		}
+
+		var msgs []llm.Message
+		for _, m := range history {
+			var role llm.Role
+			switch m.Role {
+			case "user":
+				role = llm.RoleUser
+			case "assistant":
+				role = llm.RoleAssistant
+			case "tool":
+				role = llm.RoleTool
+			default:
+				continue
+			}
+			msgs = append(msgs, llm.Message{Role: role, Content: m.Content, ToolCallID: m.ToolCallID})
 		}
 
 		// Call LLM
-		deltaCh, err := cfg.LLMProvider.Chat(ctx, cfgLLM, msgs, cfg.Registry.Definitions())
+		emit("thinking", "Pensando...", nil)
+		resp, err := a.llm.Chat(ctx, llm.ChatRequest{
+			System:   systemPrompt,
+			Messages: msgs,
+			Tools:    tools.Definitions(),
+		})
 		if err != nil {
-			emit(Event{Type: EventError, Content: err.Error()})
-			return err
+			emit("error", fmt.Sprintf("LLM error: %v", err), nil)
+			return
 		}
 
-		// Collect streaming response
-		var (
-			textBuf    strings.Builder
-			toolCalls  []llm.ToolCall
-		)
-
-		for delta := range deltaCh {
-			if delta.Error != nil {
-				emit(Event{Type: EventError, Content: delta.Error.Error()})
-				return delta.Error
+		// No tool calls — final answer
+		if len(resp.ToolCalls) == 0 {
+			if resp.Content != "" {
+				_ = a.mem.AppendMessage(threadID, Message{Role: "assistant", Content: resp.Content})
+				emit("message", resp.Content, nil)
 			}
-			switch delta.Type {
-			case llm.DeltaThinking:
-				emit(Event{Type: EventThinking, Content: delta.Text})
-			case llm.DeltaText:
-				textBuf.WriteString(delta.Text)
-			case llm.DeltaToolCall:
-				if delta.ToolCall != nil {
-					toolCalls = append(toolCalls, *delta.ToolCall)
-				}
-			}
+			emit("done", "", nil)
+			return
 		}
 
-		assistantText := textBuf.String()
-
-		// Add assistant turn to history
-		assistantMsg := llm.Message{
-			Role:      llm.RoleAssistant,
-			Content:   assistantText,
-			ToolCalls: toolCalls,
-		}
-		msgs = append(msgs, assistantMsg)
-
-		// Emit text message if any
-		if assistantText != "" {
-			emit(Event{Type: EventMessage, Content: assistantText})
-		}
-
-		// If no tool calls, we're done
-		if len(toolCalls) == 0 {
-			emit(Event{Type: EventDone, Content: "Concluído"})
-			return nil
-		}
+		// Save assistant turn (tool calls as JSON)
+		assistantJSON, _ := json.Marshal(resp.ToolCalls)
+		_ = a.mem.AppendMessage(threadID, Message{Role: "assistant", Content: string(assistantJSON)})
 
 		// Execute each tool call
-		for _, tc := range toolCalls {
-			// Parse args for display
-			var displayArgs map[string]interface{}
-			_ = json.Unmarshal([]byte(tc.Arguments), &displayArgs)
-
-			emit(Event{
-				Type:    EventToolCall,
-				Content: fmt.Sprintf("%s(%s)", tc.Name, summarizeArgs(displayArgs)),
-				Data: ToolCallData{
-					ToolName:  tc.Name,
-					Arguments: displayArgs,
-				},
+		for _, tc := range resp.ToolCalls {
+			emit("tool_call", fmt.Sprintf("Executando %s", tc.Name), map[string]any{
+				"tool_name": tc.Name,
+				"args":      tc.Arguments,
 			})
 
-			// Check if tool requires approval
-			if isDestructive(tc.Name) && cfg.ApprovalFn != nil {
-				approvalData := ApprovalData{
-					ApprovalID:  tc.ID,
-					Action:      tc.Name,
-					Description: fmt.Sprintf("O agente quer executar '%s' com os argumentos: %s", tc.Name, tc.Arguments),
-					Data:        displayArgs,
-				}
-				emit(Event{Type: EventApprovalRequired, Content: tc.Name, Data: approvalData})
-				if !cfg.ApprovalFn(approvalData) {
-					// Denied — inject a tool result saying so
-					msgs = append(msgs, llm.Message{
-						Role:       llm.RoleTool,
-						Content:    "Ação recusada pelo usuário.",
-						ToolCallID: tc.ID,
-					})
-					continue
-				}
-			}
-
-			// Execute
-			output, execErr := cfg.Registry.Execute(ctx, tc.Name, tc.Arguments)
+			output, execErr := tools.Execute(ctx, tc.Name, tc.Arguments)
 			success := execErr == nil
+			outputStr := output
 			if execErr != nil {
-				output = execErr.Error()
+				outputStr = execErr.Error()
 			}
 
-			emit(Event{
-				Type:    EventToolResult,
-				Content: output,
-				Data: ToolResultData{
-					ToolName: tc.Name,
-					Output:   output,
-					Success:  success,
-				},
+			// Truncate very long outputs
+			if len(outputStr) > 4000 {
+				outputStr = outputStr[:4000] + "\n... [truncado]"
+			}
+
+			emit("tool_result", "", map[string]any{
+				"tool_name": tc.Name,
+				"output":    outputStr,
+				"success":   success,
 			})
 
-			// Add tool result to history
-			msgs = append(msgs, llm.Message{
-				Role:       llm.RoleTool,
-				Content:    output,
+			_ = a.mem.AppendMessage(threadID, Message{
+				Role:       "tool",
+				Content:    outputStr,
 				ToolCallID: tc.ID,
 			})
 		}
 	}
 
-	emit(Event{Type: EventDone, Content: "Número máximo de iterações atingido."})
-	return nil
-}
-
-// isDestructive returns true for tools that modify or delete data.
-func isDestructive(toolName string) bool {
-	destructive := map[string]bool{
-		"notion_page_delete":          true,
-		"notion_page_set_properties":  true,
-		"notion_db_create":            true,
-		"git_commit":                  true,
-		"git_push":                    true,
-		"write_file":                  true,
-	}
-	return destructive[toolName]
-}
-
-func summarizeArgs(args map[string]interface{}) string {
-	if args == nil {
-		return ""
-	}
-	parts := make([]string, 0, 2)
-	for k, v := range args {
-		s := fmt.Sprintf("%v", v)
-		if len(s) > 40 {
-			s = s[:40] + "..."
-		}
-		parts = append(parts, fmt.Sprintf("%s=%q", k, s))
-		if len(parts) >= 2 {
-			break
-		}
-	}
-	return strings.Join(parts, ", ")
+	emit("done", "", nil)
 }
