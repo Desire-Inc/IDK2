@@ -10,11 +10,10 @@ import (
 )
 
 type oaiMessage struct {
-	Role       string       `json:"role"`
-	Content    any          `json:"content,omitempty"`
+	Role       string        `json:"role"`
+	Content    any           `json:"content,omitempty"`
 	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string       `json:"tool_call_id,omitempty"`
-	Name       string       `json:"name,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
 }
 
 type oaiToolCall struct {
@@ -29,8 +28,8 @@ type oaiFunctionCall struct {
 }
 
 type oaiTool struct {
-	Type     string          `json:"type"`
-	Function oaiFunctionDef  `json:"function"`
+	Type     string         `json:"type"`
+	Function oaiFunctionDef `json:"function"`
 }
 
 type oaiFunctionDef struct {
@@ -54,82 +53,81 @@ type oaiResponse struct {
 	} `json:"error"`
 }
 
+type openAICompatProvider struct {
+	model   string
+	apiKey  string
+	baseURL string
+	client  *http.Client
+}
+
 func (p *openAICompatProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
-	// Build messages
 	var msgs []oaiMessage
 	if req.System != "" {
 		msgs = append(msgs, oaiMessage{Role: "system", Content: req.System})
 	}
 	for _, m := range req.Messages {
 		msg := oaiMessage{Role: string(m.Role)}
-		if m.Role == RoleTool {
+		switch m.Role {
+		case RoleTool:
 			msg.Content = m.Content
 			msg.ToolCallID = m.ToolCallID
-		} else if len(m.ToolCalls) > 0 {
-			var tcs []oaiToolCall
-			for _, tc := range m.ToolCalls {
-				tcs = append(tcs, oaiToolCall{
-					ID:   tc.ID,
-					Type: "function",
-					Function: oaiFunctionCall{
-						Name:      tc.Name,
-						Arguments: tc.Arguments,
-					},
-				})
+		case RoleAssistant:
+			if len(m.ToolCalls) > 0 {
+				var tcs []oaiToolCall
+				for _, tc := range m.ToolCalls {
+					tcs = append(tcs, oaiToolCall{
+						ID: tc.ID, Type: "function",
+						Function: oaiFunctionCall{Name: tc.Name, Arguments: tc.Arguments},
+					})
+				}
+				msg.ToolCalls = tcs
+			} else {
+				msg.Content = m.Content
 			}
-			msg.ToolCalls = tcs
-		} else {
+		default:
 			msg.Content = m.Content
 		}
 		msgs = append(msgs, msg)
 	}
 
-	// Build tools
-	var tools []oaiTool
+	var oaiTools []oaiTool
 	for _, td := range req.Tools {
 		params := td.Parameters
 		if params == nil {
 			params = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		tools = append(tools, oaiTool{
+		oaiTools = append(oaiTools, oaiTool{
 			Type: "function",
-			Function: oaiFunctionDef{
-				Name:        td.Name,
-				Description: td.Description,
-				Parameters:  params,
-			},
+			Function: oaiFunctionDef{Name: td.Name, Description: td.Description, Parameters: params},
 		})
 	}
 
-	body := oaiRequest{Model: p.model, Messages: msgs, Tools: tools}
-	bodyBytes, err := json.Marshal(body)
-	if err != nil {
-		return ChatResponse{}, err
-	}
+	body := oaiRequest{Model: p.model, Messages: msgs, Tools: oaiTools}
+	bodyBytes, _ := json.Marshal(body)
 
-	request, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(bodyBytes))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(bodyBytes))
 	if err != nil {
 		return ChatResponse{}, err
 	}
-	request.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Type", "application/json")
 	if p.apiKey != "" {
-		request.Header.Set("Authorization", "Bearer "+p.apiKey)
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
 
-	resp, err := p.client.Do(request)
+	httpResp, err := p.client.Do(httpReq)
 	if err != nil {
 		return ChatResponse{}, err
 	}
-	defer resp.Body.Close()
+	defer httpResp.Body.Close()
 
-	respBytes, err := io.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		return ChatResponse{}, err
 	}
 
 	var oaiResp oaiResponse
 	if err := json.Unmarshal(respBytes, &oaiResp); err != nil {
-		return ChatResponse{}, fmt.Errorf("decode error: %w\nbody: %s", err, string(respBytes))
+		return ChatResponse{}, fmt.Errorf("decode: %w\nbody: %s", err, string(respBytes))
 	}
 	if oaiResp.Error != nil {
 		return ChatResponse{}, fmt.Errorf("API error: %s", oaiResp.Error.Message)
@@ -141,17 +139,11 @@ func (p *openAICompatProvider) Chat(ctx context.Context, req ChatRequest) (ChatR
 	choice := oaiResp.Choices[0].Message
 	var tcs []ToolCall
 	for _, tc := range choice.ToolCalls {
-		tcs = append(tcs, ToolCall{
-			ID:        tc.ID,
-			Name:      tc.Function.Name,
-			Arguments: tc.Function.Arguments,
-		})
+		tcs = append(tcs, ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments})
 	}
-
 	content := ""
 	if s, ok := choice.Content.(string); ok {
 		content = s
 	}
-
 	return ChatResponse{Content: content, ToolCalls: tcs}, nil
 }
