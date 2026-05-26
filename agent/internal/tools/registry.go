@@ -2,57 +2,63 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/Desire-Inc/notion-agent/internal/llm"
 )
 
-// Tool is a callable function the agent can use
+// Tool is a function the agent can call.
 type Tool struct {
-	Definition llm.ToolDefinition
-	Execute    func(ctx context.Context, args map[string]interface{}) (string, error)
-	Dangerous  bool // Requires human approval before execution
+	Name        string
+	Description string
+	Parameters  map[string]interface{}
+	Handler     func(ctx context.Context, args map[string]interface{}) (string, error)
 }
 
-// Registry holds all available tools
+// Registry holds all registered tools.
 type Registry struct {
-	tools map[string]*Tool
+	tools map[string]Tool
 }
 
 func NewRegistry() *Registry {
-	r := &Registry{tools: make(map[string]*Tool)}
-	r.registerNotionTools()
-	r.registerCodeTools()
-	r.registerGitTools()
-	r.registerFilesystemTools()
+	r := &Registry{tools: map[string]Tool{}}
+	registerNotion(r)
+	registerCode(r)
+	registerGit(r)
+	registerFilesystem(r)
 	return r
 }
 
-func (r *Registry) Register(t *Tool) {
-	r.tools[t.Definition.Name] = t
+func (r *Registry) Register(t Tool) {
+	r.tools[t.Name] = t
 }
 
-func (r *Registry) Get(name string) (*Tool, error) {
+func (r *Registry) Get(name string) (Tool, bool) {
+	t, ok := r.tools[name]
+	return t, ok
+}
+
+func (r *Registry) Execute(ctx context.Context, name, argsJSON string) (string, error) {
 	t, ok := r.tools[name]
 	if !ok {
-		return nil, fmt.Errorf("tool not found: %s", name)
+		return "", fmt.Errorf("tool not found: %s", name)
 	}
-	return t, nil
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", fmt.Errorf("invalid args JSON: %w", err)
+	}
+	return t.Handler(ctx, args)
 }
 
 func (r *Registry) Definitions() []llm.ToolDefinition {
 	defs := make([]llm.ToolDefinition, 0, len(r.tools))
 	for _, t := range r.tools {
-		defs = append(defs, t.Definition)
+		defs = append(defs, llm.ToolDefinition{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.Parameters,
+		})
 	}
 	return defs
-}
-
-func (r *Registry) Execute(ctx context.Context, name string, args map[string]interface{}) (string, bool, error) {
-	t, err := r.Get(name)
-	if err != nil {
-		return "", false, err
-	}
-	output, err := t.Execute(ctx, args)
-	return output, t.Dangerous, err
 }

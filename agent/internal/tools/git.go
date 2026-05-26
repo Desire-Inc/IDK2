@@ -1,133 +1,121 @@
 package tools
 
 import (
+	"bytes"
 	"context"
-	"fmt"
 	"os/exec"
 	"strings"
-
-	"github.com/Desire-Inc/notion-agent/internal/llm"
 )
 
-func (r *Registry) registerGitTools() {
-	r.Register(&Tool{
-		Definition: llm.ToolDefinition{
-			Name:        "git_status",
-			Description: "Get the current git status of a repository",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path": map[string]interface{}{"type": "string", "description": "Repository path (default: current dir)"},
-				},
+func git(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	return strings.TrimRight(out.String(), "\n"), err
+}
+
+func registerGit(r *Registry) {
+	r.Register(Tool{
+		Name:        "git_status",
+		Description: "Show git status of a repository.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"dir": map[string]interface{}{"type": "string", "description": "Repository directory"},
 			},
 		},
-		Execute: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			path, _ := args["path"].(string)
-			return runGit(ctx, path, "status", "--short")
+		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
+			return git(ctx, sarg(args, "dir"), "status", "--short")
 		},
 	})
 
-	r.Register(&Tool{
-		Definition: llm.ToolDefinition{
-			Name:        "git_diff",
-			Description: "Get the diff of uncommitted changes in a git repository",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path": map[string]interface{}{"type": "string", "description": "Repository path"},
-					"file": map[string]interface{}{"type": "string", "description": "Specific file to diff"},
-				},
+	r.Register(Tool{
+		Name:        "git_diff",
+		Description: "Show git diff for staged or unstaged changes.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"dir":    map[string]interface{}{"type": "string"},
+				"staged": map[string]interface{}{"type": "boolean", "description": "Show staged diff"},
 			},
 		},
-		Execute: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			path, _ := args["path"].(string)
-			gitArgs := []string{"diff"}
-			if file, ok := args["file"].(string); ok && file != "" {
-				gitArgs = append(gitArgs, "--", file)
+		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
+			if staged, _ := args["staged"].(bool); staged {
+				return git(ctx, sarg(args, "dir"), "diff", "--cached")
 			}
-			return runGit(ctx, path, gitArgs...)
+			return git(ctx, sarg(args, "dir"), "diff")
 		},
 	})
 
-	r.Register(&Tool{
-		Definition: llm.ToolDefinition{
-			Name:        "git_log",
-			Description: "Get recent commit history of a git repository",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path":  map[string]interface{}{"type": "string", "description": "Repository path"},
-					"limit": map[string]interface{}{"type": "number", "description": "Number of commits (default: 10)"},
-				},
+	r.Register(Tool{
+		Name:        "git_commit",
+		Description: "Stage all changes and create a git commit.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"dir":     map[string]interface{}{"type": "string"},
+				"message": map[string]interface{}{"type": "string", "description": "Commit message"},
 			},
+			"required": []string{"message"},
 		},
-		Execute: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			path, _ := args["path"].(string)
-			limit := 10
-			if l, ok := args["limit"].(float64); ok && l > 0 {
-				limit = int(l)
+		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
+			dir := sarg(args, "dir")
+			if _, err := git(ctx, dir, "add", "-A"); err != nil {
+				return "", err
 			}
-			return runGit(ctx, path, "log", "--oneline", fmt.Sprintf("-%d", limit))
+			return git(ctx, dir, "commit", "-m", sarg(args, "message"))
 		},
 	})
 
-	r.Register(&Tool{
-		Definition: llm.ToolDefinition{
-			Name:        "git_commit",
-			Description: "Stage all changes and create a git commit",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path":    map[string]interface{}{"type": "string", "description": "Repository path"},
-					"message": map[string]interface{}{"type": "string", "description": "Commit message"},
-				},
-				"required": []string{"message"},
+	r.Register(Tool{
+		Name:        "git_push",
+		Description: "Push commits to remote.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"dir":    map[string]interface{}{"type": "string"},
+				"remote": map[string]interface{}{"type": "string", "description": "Remote name (default: origin)"},
+				"branch": map[string]interface{}{"type": "string", "description": "Branch name (default: HEAD)"},
 			},
 		},
-		Dangerous: true,
-		Execute: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			path, _ := args["path"].(string)
-			message, _ := args["message"].(string)
-			if _, err := runGit(ctx, path, "add", "-A"); err != nil {
-				return "", fmt.Errorf("git add: %w", err)
+		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
+			remote := sarg(args, "remote")
+			if remote == "" {
+				remote = "origin"
 			}
-			return runGit(ctx, path, "commit", "-m", message)
+			branch := sarg(args, "branch")
+			if branch == "" {
+				branch = "HEAD"
+			}
+			return git(ctx, sarg(args, "dir"), "push", remote, branch)
 		},
 	})
 
-	r.Register(&Tool{
-		Definition: llm.ToolDefinition{
-			Name:        "git_push",
-			Description: "Push commits to the remote git repository",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path":   map[string]interface{}{"type": "string", "description": "Repository path"},
-					"branch": map[string]interface{}{"type": "string", "description": "Branch to push"},
-				},
+	r.Register(Tool{
+		Name:        "git_log",
+		Description: "Show recent git commit log.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"dir":   map[string]interface{}{"type": "string"},
+				"limit": map[string]interface{}{"type": "integer", "description": "Number of commits (default 10)"},
 			},
 		},
-		Dangerous: true,
-		Execute: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			path, _ := args["path"].(string)
-			gitArgs := []string{"push"}
-			if branch, ok := args["branch"].(string); ok && branch != "" {
-				gitArgs = append(gitArgs, "origin", branch)
+		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
+			limit := "10"
+			if n, ok := args["limit"].(float64); ok {
+				limit = fmt.Sprintf("%d", int(n))
 			}
-			return runGit(ctx, path, gitArgs...)
+			return git(ctx, sarg(args, "dir"), "log", "--oneline", "-"+limit)
 		},
 	})
 }
 
-func runGit(ctx context.Context, repoPath string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	if repoPath != "" {
-		cmd.Dir = repoPath
-	}
-	out, err := cmd.CombinedOutput()
-	result := strings.TrimSpace(string(out))
-	if err != nil {
-		return result, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return result, nil
+func fmt_Sprintf(format string, a ...interface{}) string {
+	return fmt_Sprintf(format, a...)
 }

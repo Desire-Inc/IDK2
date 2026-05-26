@@ -6,88 +6,114 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/Desire-Inc/notion-agent/internal/llm"
 )
 
-func (r *Registry) registerFilesystemTools() {
-	r.Register(&Tool{
-		Definition: llm.ToolDefinition{
-			Name:        "read_file",
-			Description: "Read the contents of a local file",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path": map[string]interface{}{"type": "string", "description": "File path"},
-				},
-				"required": []string{"path"},
+func registerFilesystem(r *Registry) {
+	r.Register(Tool{
+		Name:        "read_file",
+		Description: "Read the contents of a file from the local filesystem.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"path": map[string]interface{}{"type": "string", "description": "Absolute or relative file path"},
 			},
+			"required": []string{"path"},
 		},
-		Execute: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			path, _ := args["path"].(string)
+		Handler: func(_ context.Context, args map[string]interface{}) (string, error) {
+			path := sarg(args, "path")
+			path = filepath.Clean(path)
 			b, err := os.ReadFile(path)
 			if err != nil {
-				return "", fmt.Errorf("read_file %s: %w", path, err)
+				return "", err
 			}
 			return string(b), nil
 		},
 	})
 
-	r.Register(&Tool{
-		Definition: llm.ToolDefinition{
-			Name:        "write_file",
-			Description: "Write content to a local file (creates or overwrites)",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path":    map[string]interface{}{"type": "string", "description": "File path"},
-					"content": map[string]interface{}{"type": "string", "description": "Content to write"},
-				},
-				"required": []string{"path", "content"},
+	r.Register(Tool{
+		Name:        "write_file",
+		Description: "Write content to a file on the local filesystem. Creates parent directories as needed.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"path":    map[string]interface{}{"type": "string"},
+				"content": map[string]interface{}{"type": "string", "description": "File content"},
+				"append":  map[string]interface{}{"type": "boolean", "description": "Append instead of overwrite"},
 			},
+			"required": []string{"path", "content"},
 		},
-		Execute: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			path, _ := args["path"].(string)
-			content, _ := args["content"].(string)
-			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		Handler: func(_ context.Context, args map[string]interface{}) (string, error) {
+			path := filepath.Clean(sarg(args, "path"))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				return "", err
 			}
-			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-				return "", fmt.Errorf("write_file %s: %w", path, err)
+			flags := os.O_CREATE | os.O_WRONLY
+			if appendMode, _ := args["append"].(bool); appendMode {
+				flags |= os.O_APPEND
+			} else {
+				flags |= os.O_TRUNC
 			}
-			return fmt.Sprintf("Arquivo escrito: %s (%d bytes)", path, len(content)), nil
+			f, err := os.OpenFile(path, flags, 0o644)
+			if err != nil {
+				return "", err
+			}
+			defer f.Close()
+			_, err = f.WriteString(sarg(args, "content"))
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Written %d bytes to %s", len(sarg(args, "content")), path), nil
 		},
 	})
 
-	r.Register(&Tool{
-		Definition: llm.ToolDefinition{
-			Name:        "list_directory",
-			Description: "List files and directories at a given path",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path": map[string]interface{}{"type": "string", "description": "Directory path (default: current directory)"},
-				},
+	r.Register(Tool{
+		Name:        "list_directory",
+		Description: "List files and directories at a given path.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"path":      map[string]interface{}{"type": "string"},
+				"recursive": map[string]interface{}{"type": "boolean", "description": "List recursively"},
 			},
+			"required": []string{"path"},
 		},
-		Execute: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			path, _ := args["path"].(string)
-			if path == "" {
-				path = "."
-			}
-			entries, err := os.ReadDir(path)
-			if err != nil {
-				return "", fmt.Errorf("list_directory %s: %w", path, err)
-			}
-			var lines []string
-			for _, e := range entries {
-				if e.IsDir() {
-					lines = append(lines, e.Name()+"/")
-				} else {
-					lines = append(lines, e.Name())
+		Handler: func(_ context.Context, args map[string]interface{}) (string, error) {
+			path := filepath.Clean(sarg(args, "path"))
+			recursive, _ := args["recursive"].(bool)
+
+			var entries []string
+			if recursive {
+				err := filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+					if err != nil {
+						return err
+					}
+					if p != path {
+						rel, _ := filepath.Rel(path, p)
+						if info.IsDir() {
+							entries = append(entries, rel+"/")
+						} else {
+							entries = append(entries, rel)
+						}
+					}
+					return nil
+				})
+				if err != nil {
+					return "", err
+				}
+			} else {
+				infos, err := os.ReadDir(path)
+				if err != nil {
+					return "", err
+				}
+				for _, info := range infos {
+					if info.IsDir() {
+						entries = append(entries, info.Name()+"/")
+					} else {
+						entries = append(entries, info.Name())
+					}
 				}
 			}
-			return strings.Join(lines, "\n"), nil
+			return strings.Join(entries, "\n"), nil
 		},
 	})
 }

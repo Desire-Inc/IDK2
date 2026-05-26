@@ -4,108 +4,99 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
-	"time"
-
-	"github.com/Desire-Inc/notion-agent/internal/llm"
 )
 
-func (r *Registry) registerCodeTools() {
-	r.Register(&Tool{
-		Definition: llm.ToolDefinition{
-			Name:        "run_code",
-			Description: "Execute code in a sandboxed environment. Supports Python, JavaScript (Node), and Bash.",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"language": map[string]interface{}{
-						"type":        "string",
-						"description": "Programming language",
-						"enum":        []string{"python", "javascript", "bash"},
-					},
-					"code":    map[string]interface{}{"type": "string", "description": "Code to execute"},
-					"timeout": map[string]interface{}{"type": "number", "description": "Timeout in seconds (default: 30, max: 120)"},
-				},
-				"required": []string{"language", "code"},
+func registerCode(r *Registry) {
+	r.Register(Tool{
+		Name:        "run_code",
+		Description: "Execute code in a sandboxed environment. Supports python, javascript (node), and bash.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"language": map[string]interface{}{"type": "string", "enum": []string{"python", "javascript", "bash"}},
+				"code":     map[string]interface{}{"type": "string", "description": "Code to execute"},
+				"timeout": map[string]interface{}{"type": "integer", "description": "Timeout in seconds (default 30)"},
 			},
+			"required": []string{"language", "code"},
 		},
-		Execute: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			language, _ := args["language"].(string)
-			code, _ := args["code"].(string)
-			timeoutSecs := 30.0
-			if t, ok := args["timeout"].(float64); ok && t > 0 {
-				if t > 120 {
-					t = 120
-				}
-				timeoutSecs = t
+		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
+			lang := sarg(args, "language")
+			code := sarg(args, "code")
+
+			// Try Docker sandbox first
+			if dockerAvailable() {
+				return runInDocker(ctx, lang, code)
 			}
-			return executeCode(ctx, language, code, time.Duration(timeoutSecs)*time.Second)
+			// Fallback to local execution
+			return runLocal(ctx, lang, code)
 		},
 	})
 }
 
-func executeCode(ctx context.Context, language, code string, timeout time.Duration) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	if isDockerAvailable() {
-		return executeInDocker(ctx, language, code)
-	}
-	return executeLocally(ctx, language, code)
+func dockerAvailable() bool {
+	cmd := exec.Command("docker", "info")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	return cmd.Run() == nil
 }
 
-func executeInDocker(ctx context.Context, language, code string) (string, error) {
-	var image, interpreter string
-	switch language {
+func runInDocker(ctx context.Context, lang, code string) (string, error) {
+	image := map[string]string{
+		"python":     "python:3.12-slim",
+		"javascript": "node:20-slim",
+		"bash":       "alpine:latest",
+	}[lang]
+	if image == "" {
+		return "", fmt.Errorf("unsupported language: %s", lang)
+	}
+
+	var command []string
+	switch lang {
 	case "python":
-		image, interpreter = "python:3.12-slim", "python3"
+		command = []string{"python", "-c", code}
 	case "javascript":
-		image, interpreter = "node:20-slim", "node"
+		command = []string{"node", "-e", code}
 	case "bash":
-		image, interpreter = "bash:5", "bash"
-	default:
-		return "", fmt.Errorf("unsupported language: %s", language)
+		command = []string{"sh", "-c", code}
 	}
 
-	cmd := exec.CommandContext(ctx,
-		"docker", "run", "--rm",
-		"--network=none",
-		"--memory=256m",
-		"--cpus=0.5",
-		"--security-opt=no-new-privileges",
-		image, interpreter, "-c", code,
-	)
-	return combinedOutput(cmd)
+	args := []string{"run", "--rm", "--network=none", "--memory=256m", "--cpus=0.5", image}
+	args = append(args, command...)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%s\nstderr: %s", err, errBuf.String())
+	}
+	return out.String(), nil
 }
 
-func executeLocally(ctx context.Context, language, code string) (string, error) {
+func runLocal(ctx context.Context, lang, code string) (string, error) {
 	var cmd *exec.Cmd
-	switch language {
+	switch lang {
 	case "python":
 		cmd = exec.CommandContext(ctx, "python3", "-c", code)
 	case "javascript":
 		cmd = exec.CommandContext(ctx, "node", "-e", code)
 	case "bash":
-		cmd = exec.CommandContext(ctx, "bash", "-c", code)
+		cmd = exec.CommandContext(ctx, "sh", "-c", code)
 	default:
-		return "", fmt.Errorf("unsupported language: %s", language)
+		return "", fmt.Errorf("unsupported language: %s", lang)
 	}
-	return combinedOutput(cmd)
-}
 
-func combinedOutput(cmd *exec.Cmd) (string, error) {
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	result := strings.TrimSpace(stdout.String())
-	if stderr.Len() > 0 {
-		result += "\n[stderr]\n" + strings.TrimSpace(stderr.String())
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	cmd.Env = os.Environ()
+
+	if err := cmd.Run(); err != nil {
+		return out.String(), fmt.Errorf("exit error: %w\noutput: %s", err, out.String())
 	}
-	return result, err
-}
-
-func isDockerAvailable() bool {
-	return exec.Command("docker", "info").Run() == nil
+	return strings.TrimRight(out.String(), "\n"), nil
 }
