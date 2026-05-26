@@ -1,209 +1,160 @@
 # Notion Agent
 
-> AI agent that controls your Notion workspace — just like Codex or Claude, but Notion-native.
-
----
-
-## O que é
-
-O **Notion Agent** é um agente ReAct (Raciocinar + Agir) que recebe uma tarefa em linguagem natural e executa ações no seu workspace Notion de forma autônoma:
-
-- Criar e editar páginas, databases e blocos
-- Consultar e filtrar dados
-- Executar código (Python, JS, Bash) em sandbox
-- Operar com Git/filesystem
-- Pedir aprovação antes de ações destrutivas
-
-A interface é uma aplicação desktop (Wails + React), com design inspirado no Codex/Claude mas com a identidade visual do Notion.
-
----
+Um agente de IA no estilo Codex/Claude que controla seu workspace Notion de forma autônoma.
 
 ## Stack
 
 | Camada | Tecnologia |
-|---|---|
-| Backend | Go 1.22, [Wails v2](https://wails.io) |
+|--------|------------|
+| Desktop | [Wails v2](https://wails.io) (Go + WebView) |
 | Frontend | React 18 + TypeScript + TailwindCSS |
-| LLM | Anthropic Claude / OpenAI GPT / Ollama (local) |
-| Memória | SQLite (via `go-sqlite3`) |
-| Notion | Notion REST API v1 |
-| Sandbox | Docker (fallback: local) |
-
----
+| Backend | Go 1.22 |
+| LLMs | Anthropic Claude, OpenAI GPT, Ollama (local) |
+| DB local | SQLite (memória de threads) |
+| Execução de código | Docker sandbox / fallback local |
 
 ## Estrutura
 
 ```
 agent/
-├── main.go                  # Entry point Wails
-├── wails.json               # Configuração Wails
+├── main.go               # Entry point Wails
+├── wails.json            # Config da janela desktop
 ├── go.mod
-├── Makefile
 ├── internal/
-│   ├── app/
-│   │   ├── app.go           # Wails App (métodos expostos ao frontend)
-│   │   ├── loop.go          # ReAct loop principal
-│   │   ├── memory.go        # SQLite: threads e mensagens
-│   │   └── events.go        # Tipos de evento
-│   ├── llm/
-│   │   ├── provider.go      # Interface Provider + tipos
-│   │   ├── anthropic.go     # Claude (SSE streaming)
-│   │   ├── openai.go        # GPT (go-openai)
-│   │   └── ollama.go        # Ollama (local)
-│   └── tools/
-│       ├── registry.go      # Registry de tools
-│       ├── notion.go        # 12 tools Notion
-│       ├── code.go          # Sandbox Python/JS/Bash
-│       ├── git.go           # Git tools
-│       └── filesystem.go    # Read/write filesystem
-├── cmd/
-│   ├── root.go              # Cobra root
-│   └── agent.go             # CLI: notion-agent run "tarefa"
-└── frontend/
-    ├── index.html
-    ├── package.json
-    ├── vite.config.ts
-    ├── tailwind.config.js
-    └── src/
-        ├── App.tsx
-        ├── main.tsx
-        ├── types/index.ts
-        ├── store/index.ts
-        ├── hooks/useAgent.ts
-        ├── styles/globals.css
-        └── components/
-            ├── Sidebar.tsx
-            ├── Chat.tsx
-            ├── AgentStream.tsx
-            ├── Input.tsx
-            ├── DiffPanel.tsx
-            ├── ApprovalModal.tsx
-            └── SettingsModal.tsx
+│   ├── app/              # Wails App, ReAct loop, memória SQLite, eventos
+│   ├── llm/              # Provider interface + Anthropic, OpenAI, Ollama
+│   └── tools/            # Registry + ferramentas (Notion, código, git, filesystem)
+├── cmd/                  # CLI (notion-agent run "tarefa")
+└── frontend/             # React UI
+    ├── src/
+    │   ├── components/   # Sidebar, Chat, DiffPanel, AgentStream, Modals, Input
+    │   ├── store/        # Zustand store global
+    │   ├── hooks/        # useAgent (Wails bridge)
+    │   └── types/        # TypeScript types
+    └── index.html
 ```
 
----
+## Ferramentas disponíveis para o agente
 
-## Setup
+### Notion
+| Tool | Descrição |
+|------|------------|
+| `notion_search` | Busca páginas e databases |
+| `notion_page_view` | Lê uma página por ID |
+| `notion_page_create` | Cria uma nova página |
+| `notion_page_delete` | Arquiva uma página |
+| `notion_page_set_properties` | Atualiza propriedades |
+| `notion_db_list` | Lista databases |
+| `notion_db_query` | Consulta linhas de uma database |
+| `notion_db_create` | Cria uma nova database |
+| `notion_db_add_row` | Adiciona uma linha |
+| `notion_block_list` | Lista blocos de uma página |
+| `notion_block_append` | Adiciona blocos |
+| `notion_user_me` | Info do usuário autenticado |
+| `notion_comment_list` | Lista comentários |
+
+### Código
+| Tool | Descrição |
+|------|------------|
+| `run_code` | Executa Python, JavaScript ou Bash em sandbox Docker (fallback local) |
+
+### Git
+| Tool | Descrição |
+|------|------------|
+| `git_status` | Status do repositório |
+| `git_diff` | Diff staged/unstaged |
+| `git_commit` | Commit com mensagem |
+| `git_push` | Push para remote |
+| `git_log` | Histórico de commits |
+
+### Filesystem
+| Tool | Descrição |
+|------|------------|
+| `read_file` | Lê um arquivo local |
+| `write_file` | Escreve um arquivo (cria diretórios) |
+| `list_directory` | Lista arquivos e pastas |
+
+## Como rodar
 
 ### Pré-requisitos
 
-- Go 1.22+
-- Node.js 20+
-- [Wails CLI](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
-- (Opcional) Docker — para sandbox de código
-
-### Variáveis de ambiente
-
 ```bash
-# Para Anthropic (padrão)
-export ANTHROPIC_API_KEY=sk-ant-...
+# Go 1.22+
+brew install go
 
-# Para OpenAI
-export OPENAI_API_KEY=sk-...
+# Wails CLI
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
-# Notion Integration Token
-export NOTION_TOKEN=secret_...
+# Node.js 20+
+brew install node
 ```
 
-> **Como obter o NOTION_TOKEN:** vá em [notion.so/my-integrations](https://www.notion.so/my-integrations), crie uma integração, copie o token e adicione a integração às páginas/databases que o agente deve acessar.
+### Configuração
 
-### Rodar em modo desenvolvimento
+```bash
+cp .env.example .env
+# edite .env com suas chaves
+```
+
+```env
+NOTION_TOKEN=secret_xxxx          # Integration token do Notion
+ANTHROPIC_API_KEY=sk-ant-xxxx     # Chave da Anthropic (opcional)
+OPENAI_API_KEY=sk-xxxx            # Chave da OpenAI (opcional)
+```
+
+### Desenvolvimento (app desktop)
 
 ```bash
 cd agent
-make dev
-# ou:
 wails dev
 ```
 
-### Build desktop (produção)
+### Build de produção
 
 ```bash
 cd agent
-make build
-# Binário gerado em: build/bin/notion-agent
+wails build
+# executável em build/bin/notion-agent
 ```
 
 ### CLI (sem interface gráfica)
 
 ```bash
 cd agent
-go run . run "Crie uma database chamada Sprint com colunas Tarefa, Status e Responsável"
+go run ./cmd/... run "Crie uma database de tarefas com Status e Prazo"
 
-# Com provider específico
-go run . run --provider openai --model gpt-4o "Resuma todas as páginas da pasta Projetos"
+# Com OpenAI
+go run ./cmd/... run --provider openai --model gpt-4o "Resuma meu workspace"
+
+# Com Ollama local
+go run ./cmd/... run --provider ollama --model llama3 "Liste todas as páginas"
 ```
 
----
+## Design
 
-## Como funciona
+3 colunas no estilo Codex / Claude:
 
 ```
-Usuário digita tarefa
-        ↓
-  Loop ReAct (Go)
-        ↓
-  LLM raciocina → gera tool_call
-        ↓
-  Tool executada (Notion API / código / git)
-        ↓
-  Resultado devolvido ao LLM
-        ↓
-  LLM decide: continuar ou responder
-        ↓
-  Ações perigosas → ApprovalModal (usuário aprova/recusa)
-        ↓
-  Resposta final exibida no chat
+┏━━━━━━━━━━━━━━┓ ┏━━━━━━━━━━━━━━━━━━━━━━━━┓ ┏━━━━━━━━━━━━━━━━━┓
+┃ Threads     ┃ ┃ Chat / Streaming    ┃ ┃ Atividade (tools) ┃
+┃ (histórico) ┃ ┃                     ┃ ┃ + diff Notion     ┃
+┃             ┃ ┃ [input]             ┃ ┃                   ┃
+┗━━━━━━━━━━━━━━┛ ┗━━━━━━━━━━━━━━━━━━━━━━━━┛ ┗━━━━━━━━━━━━━━━━━┛
 ```
 
-### Tools disponíveis
+Cores Notion dark: `#191919` sidebar • `#1E1E1E` chat • `#252525` painel • `#2383E2` accent
 
-| Tool | Descrição |
-|---|---|
-| `notion_search` | Busca páginas e databases |
-| `notion_page_view` | Lê uma página por ID |
-| `notion_page_create` | Cria página |
-| `notion_page_delete` | Arquiva página |
-| `notion_page_set_properties` | Atualiza propriedades |
-| `notion_db_list` | Lista databases |
-| `notion_db_query` | Consulta rows com filtros |
-| `notion_db_create` | Cria database |
-| `notion_db_add_row` | Adiciona row a database |
-| `notion_block_list` | Lista blocos de uma página |
-| `notion_block_append` | Adiciona blocos |
-| `notion_user_me` | Info do usuário/bot autenticado |
-| `notion_comment_list` | Lista comentários |
-| `run_code` | Executa Python/JS/Bash em sandbox |
-| `read_file` | Lê arquivo local |
-| `write_file` | Escreve arquivo local |
-| `list_directory` | Lista diretório |
-| `git_status` | `git status` |
-| `git_diff` | `git diff` |
-| `git_commit` | Stage + commit |
-| `git_push` | Push para remote |
-| `git_log` | Log de commits |
+## Fluxo ReAct
 
----
-
-## Configurações (UI)
-
-Clique em **Configurações** na sidebar:
-
-- **Provedor:** Anthropic / OpenAI / Ollama
-- **Modelo:** claude-sonnet-4-5, gpt-4o, llama3, etc.
-- **API Key:** salva localmente via Wails preferences
-- **URL Ollama:** para instâncias locais customizadas
-
----
-
-## Roadmap
-
-- [ ] Phase 1 ✅ — Estrutura core (LLM + tools + UI + ReAct loop)
-- [ ] Phase 2 — Notion OAuth (login com conta do usuário)
-- [ ] Phase 3 — Melhorias de UX: histórico, diff visual de blocos, multi-agent
-
----
-
-## Licença
-
-MIT — Desire Inc
+```
+User input
+    ↓
+ System prompt (PT-BR) + histórico
+    ↓
+ LLM (stream)
+    ├─ thinking → UI: "..."
+    ├─ text     → UI: message bubble
+    └─ tool_call → executor → tool_result → next iteration
+    ↓
+ done / max_iterations
+```

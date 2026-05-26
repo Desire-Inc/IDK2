@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const anthropicBaseURL = "https://api.anthropic.com/v1/messages"
+const anthropicBaseURL  = "https://api.anthropic.com/v1/messages"
 const anthropicVersion  = "2023-06-01"
 const defaultClaudeModel = "claude-sonnet-4-5"
 
@@ -31,7 +31,12 @@ func NewAnthropic(apiKey, model string) Provider {
 func (a *anthropicProvider) Name() string  { return "anthropic" }
 func (a *anthropicProvider) Model() string { return a.model }
 
-func (a *anthropicProvider) Chat(ctx context.Context, cfg Config, messages []Message, tools []ToolDefinition) (<-chan Delta, error) {
+func (a *anthropicProvider) Chat(
+	ctx context.Context,
+	cfg Config,
+	messages []Message,
+	tools []ToolDefinition,
+) (<-chan Delta, error) {
 	payload := map[string]interface{}{
 		"model":      a.model,
 		"max_tokens": cfg.MaxTokens,
@@ -73,10 +78,14 @@ func (a *anthropicProvider) Chat(ctx context.Context, cfg Config, messages []Mes
 	go func() {
 		defer close(ch)
 		defer resp.Body.Close()
-		scanner := bufio.NewScanner(resp.Body)
 
-		var currentToolID, currentToolName, currentToolArgs string
-		inTool := false
+		scanner := bufio.NewScanner(resp.Body)
+		var (
+			currentToolID   string
+			currentToolName string
+			currentToolArgs string
+			inTool          bool
+		)
 
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -97,8 +106,8 @@ func (a *anthropicProvider) Chat(ctx context.Context, cfg Config, messages []Mes
 			case "content_block_start":
 				if cb, ok := evt["content_block"].(map[string]interface{}); ok {
 					if cb["type"] == "tool_use" {
-						currentToolID   = str(cb["id"])
-						currentToolName = str(cb["name"])
+						currentToolID   = strVal(cb["id"])
+						currentToolName = strVal(cb["name"])
 						currentToolArgs = ""
 						inTool = true
 					}
@@ -107,11 +116,11 @@ func (a *anthropicProvider) Chat(ctx context.Context, cfg Config, messages []Mes
 				if delta, ok := evt["delta"].(map[string]interface{}); ok {
 					switch delta["type"] {
 					case "text_delta":
-						ch <- Delta{Type: DeltaText, Text: str(delta["text"])}
+						ch <- Delta{Type: DeltaText, Text: strVal(delta["text"])}
 					case "thinking_delta":
-						ch <- Delta{Type: DeltaThinking, Text: str(delta["thinking"])}
+						ch <- Delta{Type: DeltaThinking, Text: strVal(delta["thinking"])}
 					case "input_json_delta":
-						currentToolArgs += str(delta["partial_json"])
+						currentToolArgs += strVal(delta["partial_json"])
 					}
 				}
 			case "content_block_stop":
@@ -136,7 +145,7 @@ func (a *anthropicProvider) Chat(ctx context.Context, cfg Config, messages []Mes
 
 // ---- helpers ----------------------------------------------------------------
 
-func str(v interface{}) string {
+func strVal(v interface{}) string {
 	if v == nil {
 		return ""
 	}
@@ -157,10 +166,13 @@ func convertMessagesAnthropic(msgs []Message) []map[string]interface{} {
 					content = append(content, map[string]interface{}{"type": "text", "text": m.Content})
 				}
 				for _, tc := range m.ToolCalls {
-					var args map[string]interface{}
-					_ = json.Unmarshal([]byte(tc.Arguments), &args)
+					var inputArgs map[string]interface{}
+					_ = json.Unmarshal([]byte(tc.Arguments), &inputArgs)
 					content = append(content, map[string]interface{}{
-						"type": "tool_use", "id": tc.ID, "name": tc.Name, "input": args,
+						"type":  "tool_use",
+						"id":    tc.ID,
+						"name":  tc.Name,
+						"input": inputArgs,
 					})
 				}
 				out = append(out, map[string]interface{}{"role": "assistant", "content": content})
@@ -168,9 +180,16 @@ func convertMessagesAnthropic(msgs []Message) []map[string]interface{} {
 				out = append(out, map[string]interface{}{"role": "assistant", "content": m.Content})
 			}
 		case RoleTool:
+			// Anthropic expects tool_result inside a user turn
 			out = append(out, map[string]interface{}{
 				"role": "user",
-				"content": []map[string]interface{}"type": "tool_result", "tool_use_id": m.ToolCallID, "content": m.Content,
+				"content": []map[string]interface{}{
+					{
+						"type":       "tool_result",
+						"tool_use_id": m.ToolCallID,
+						"content":    m.Content,
+					},
+				},
 			})
 		}
 	}
