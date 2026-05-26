@@ -17,20 +17,16 @@ func registerCode(r *Registry) {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"language": map[string]interface{}{"type": "string", "enum": []string{"python", "javascript", "bash"}},
-				"code":     map[string]interface{}{"type": "string", "description": "Code to execute"},
-				"timeout": map[string]interface{}{"type": "integer", "description": "Timeout in seconds (default 30)"},
+				"code":     map[string]interface{}{"type": "string"},
 			},
 			"required": []string{"language", "code"},
 		},
 		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
 			lang := sarg(args, "language")
 			code := sarg(args, "code")
-
-			// Try Docker sandbox first
 			if dockerAvailable() {
 				return runInDocker(ctx, lang, code)
 			}
-			// Fallback to local execution
 			return runLocal(ctx, lang, code)
 		},
 	})
@@ -52,7 +48,6 @@ func runInDocker(ctx context.Context, lang, code string) (string, error) {
 	if image == "" {
 		return "", fmt.Errorf("unsupported language: %s", lang)
 	}
-
 	var command []string
 	switch lang {
 	case "python":
@@ -62,15 +57,11 @@ func runInDocker(ctx context.Context, lang, code string) (string, error) {
 	case "bash":
 		command = []string{"sh", "-c", code}
 	}
-
-	args := []string{"run", "--rm", "--network=none", "--memory=256m", "--cpus=0.5", image}
-	args = append(args, command...)
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	dockerArgs := append([]string{"run", "--rm", "--network=none", "--memory=256m", "--cpus=0.5", image}, command...)
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
-
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("%s\nstderr: %s", err, errBuf.String())
 	}
@@ -89,14 +80,12 @@ func runLocal(ctx context.Context, lang, code string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported language: %s", lang)
 	}
-
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	cmd.Env = os.Environ()
-
 	if err := cmd.Run(); err != nil {
-		return out.String(), fmt.Errorf("exit error: %w\noutput: %s", err, out.String())
+		return out.String(), fmt.Errorf("exit: %w\n%s", err, out.String())
 	}
 	return strings.TrimRight(out.String(), "\n"), nil
 }

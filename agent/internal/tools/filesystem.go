@@ -11,18 +11,16 @@ import (
 func registerFilesystem(r *Registry) {
 	r.Register(Tool{
 		Name:        "read_file",
-		Description: "Read the contents of a file from the local filesystem.",
+		Description: "Read the contents of a local file.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"path": map[string]interface{}{"type": "string", "description": "Absolute or relative file path"},
+				"path": map[string]interface{}{"type": "string"},
 			},
 			"required": []string{"path"},
 		},
 		Handler: func(_ context.Context, args map[string]interface{}) (string, error) {
-			path := sarg(args, "path")
-			path = filepath.Clean(path)
-			b, err := os.ReadFile(path)
+			b, err := os.ReadFile(filepath.Clean(sarg(args, "path")))
 			if err != nil {
 				return "", err
 			}
@@ -32,13 +30,13 @@ func registerFilesystem(r *Registry) {
 
 	r.Register(Tool{
 		Name:        "write_file",
-		Description: "Write content to a file on the local filesystem. Creates parent directories as needed.",
+		Description: "Write content to a local file. Creates directories as needed.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"path":    map[string]interface{}{"type": "string"},
-				"content": map[string]interface{}{"type": "string", "description": "File content"},
-				"append":  map[string]interface{}{"type": "boolean", "description": "Append instead of overwrite"},
+				"content": map[string]interface{}{"type": "string"},
+				"append":  map[string]interface{}{"type": "boolean"},
 			},
 			"required": []string{"path", "content"},
 		},
@@ -48,7 +46,7 @@ func registerFilesystem(r *Registry) {
 				return "", err
 			}
 			flags := os.O_CREATE | os.O_WRONLY
-			if appendMode, _ := args["append"].(bool); appendMode {
+			if a, _ := args["append"].(bool); a {
 				flags |= os.O_APPEND
 			} else {
 				flags |= os.O_TRUNC
@@ -58,11 +56,11 @@ func registerFilesystem(r *Registry) {
 				return "", err
 			}
 			defer f.Close()
-			_, err = f.WriteString(sarg(args, "content"))
-			if err != nil {
+			content := sarg(args, "content")
+			if _, err := f.WriteString(content); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("Written %d bytes to %s", len(sarg(args, "content")), path), nil
+			return fmt.Sprintf("Written %d bytes to %s", len(content), path), nil
 		},
 	})
 
@@ -73,44 +71,37 @@ func registerFilesystem(r *Registry) {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"path":      map[string]interface{}{"type": "string"},
-				"recursive": map[string]interface{}{"type": "boolean", "description": "List recursively"},
+				"recursive": map[string]interface{}{"type": "boolean"},
 			},
 			"required": []string{"path"},
 		},
 		Handler: func(_ context.Context, args map[string]interface{}) (string, error) {
 			path := filepath.Clean(sarg(args, "path"))
 			recursive, _ := args["recursive"].(bool)
-
 			var entries []string
 			if recursive {
-				err := filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
-					if err != nil {
+				_ = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+					if err != nil || p == path {
 						return err
 					}
-					if p != path {
-						rel, _ := filepath.Rel(path, p)
-						if info.IsDir() {
-							entries = append(entries, rel+"/")
-						} else {
-							entries = append(entries, rel)
-						}
+					rel, _ := filepath.Rel(path, p)
+					if info.IsDir() {
+						rel += "/"
 					}
+					entries = append(entries, rel)
 					return nil
 				})
-				if err != nil {
-					return "", err
-				}
 			} else {
 				infos, err := os.ReadDir(path)
 				if err != nil {
 					return "", err
 				}
 				for _, info := range infos {
+					name := info.Name()
 					if info.IsDir() {
-						entries = append(entries, info.Name()+"/")
-					} else {
-						entries = append(entries, info.Name())
+						name += "/"
 					}
+					entries = append(entries, name)
 				}
 			}
 			return strings.Join(entries, "\n"), nil

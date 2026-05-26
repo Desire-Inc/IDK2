@@ -8,7 +8,7 @@ import (
 	"github.com/Desire-Inc/notion-agent/internal/llm"
 )
 
-// Tool is a function the agent can call.
+// Tool is a callable unit the agent can invoke.
 type Tool struct {
 	Name        string
 	Description string

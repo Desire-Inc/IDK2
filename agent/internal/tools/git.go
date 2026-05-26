@@ -3,11 +3,12 @@ package tools
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 )
 
-func git(ctx context.Context, dir string, args ...string) (string, error) {
+func gitCmd(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if dir != "" {
 		cmd.Dir = dir
@@ -26,49 +27,49 @@ func registerGit(r *Registry) {
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"dir": map[string]interface{}{"type": "string", "description": "Repository directory"},
+				"dir": map[string]interface{}{"type": "string"},
 			},
 		},
 		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			return git(ctx, sarg(args, "dir"), "status", "--short")
+			return gitCmd(ctx, sarg(args, "dir"), "status", "--short")
 		},
 	})
 
 	r.Register(Tool{
 		Name:        "git_diff",
-		Description: "Show git diff for staged or unstaged changes.",
+		Description: "Show git diff (staged or unstaged).",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"dir":    map[string]interface{}{"type": "string"},
-				"staged": map[string]interface{}{"type": "boolean", "description": "Show staged diff"},
+				"staged": map[string]interface{}{"type": "boolean"},
 			},
 		},
 		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
 			if staged, _ := args["staged"].(bool); staged {
-				return git(ctx, sarg(args, "dir"), "diff", "--cached")
+				return gitCmd(ctx, sarg(args, "dir"), "diff", "--cached")
 			}
-			return git(ctx, sarg(args, "dir"), "diff")
+			return gitCmd(ctx, sarg(args, "dir"), "diff")
 		},
 	})
 
 	r.Register(Tool{
 		Name:        "git_commit",
-		Description: "Stage all changes and create a git commit.",
+		Description: "Stage all changes and commit.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"dir":     map[string]interface{}{"type": "string"},
-				"message": map[string]interface{}{"type": "string", "description": "Commit message"},
+				"message": map[string]interface{}{"type": "string"},
 			},
 			"required": []string{"message"},
 		},
 		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
 			dir := sarg(args, "dir")
-			if _, err := git(ctx, dir, "add", "-A"); err != nil {
+			if _, err := gitCmd(ctx, dir, "add", "-A"); err != nil {
 				return "", err
 			}
-			return git(ctx, dir, "commit", "-m", sarg(args, "message"))
+			return gitCmd(ctx, dir, "commit", "-m", sarg(args, "message"))
 		},
 	})
 
@@ -79,8 +80,8 @@ func registerGit(r *Registry) {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"dir":    map[string]interface{}{"type": "string"},
-				"remote": map[string]interface{}{"type": "string", "description": "Remote name (default: origin)"},
-				"branch": map[string]interface{}{"type": "string", "description": "Branch name (default: HEAD)"},
+				"remote": map[string]interface{}{"type": "string"},
+				"branch": map[string]interface{}{"type": "string"},
 			},
 		},
 		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -92,18 +93,18 @@ func registerGit(r *Registry) {
 			if branch == "" {
 				branch = "HEAD"
 			}
-			return git(ctx, sarg(args, "dir"), "push", remote, branch)
+			return gitCmd(ctx, sarg(args, "dir"), "push", remote, branch)
 		},
 	})
 
 	r.Register(Tool{
 		Name:        "git_log",
-		Description: "Show recent git commit log.",
+		Description: "Show recent commit log.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"dir":   map[string]interface{}{"type": "string"},
-				"limit": map[string]interface{}{"type": "integer", "description": "Number of commits (default 10)"},
+				"limit": map[string]interface{}{"type": "integer"},
 			},
 		},
 		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -111,11 +112,7 @@ func registerGit(r *Registry) {
 			if n, ok := args["limit"].(float64); ok {
 				limit = fmt.Sprintf("%d", int(n))
 			}
-			return git(ctx, sarg(args, "dir"), "log", "--oneline", "-"+limit)
+			return gitCmd(ctx, sarg(args, "dir"), "log", "--oneline", "-"+limit)
 		},
 	})
-}
-
-func fmt_Sprintf(format string, a ...interface{}) string {
-	return fmt_Sprintf(format, a...)
 }
