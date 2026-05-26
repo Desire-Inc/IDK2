@@ -10,12 +10,12 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// LLMConfigJSON is stored/loaded from preferences.
+// LLMConfigJSON is the LLM configuration stored in the app.
 type LLMConfigJSON struct {
-	Provider string `json:"provider"` // "anthropic" | "openai" | "openai_compatible" | "ollama"
+	Provider string `json:"provider"` // "openai_compatible" | "anthropic" | "openai" | "ollama"
 	Model    string `json:"model"`
 	APIKey   string `json:"api_key"`
-	BaseURL  string `json:"base_url"` // for openai_compatible providers
+	BaseURL  string `json:"base_url"`
 }
 
 var defaultLLMConfig = LLMConfigJSON{
@@ -25,16 +25,15 @@ var defaultLLMConfig = LLMConfigJSON{
 	BaseURL:  "https://opengateway.gitlawb.com/v1",
 }
 
-// App is the Wails application struct.
+// App is the main Wails application struct.
 type App struct {
-	ctx       context.Context
-	mem       *Memory
-	registry  *tools.Registry
-	llmConfig LLMConfigJSON
+	ctx        context.Context
+	mem        *Memory
+	registry   *tools.Registry
+	llmConfig  LLMConfigJSON
 
-	// Running agent
-	mu        sync.Mutex
-	cancel    context.CancelFunc
+	mu         sync.Mutex
+	cancel     context.CancelFunc
 	approvalCh chan bool
 }
 
@@ -53,19 +52,18 @@ func NewApp() *App {
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
-	// Load API key from env if not set
+	// Load API key from environment
 	if a.llmConfig.APIKey == "" {
-		a.llmConfig.APIKey = os.Getenv("OPENGATEWAY_API_KEY")
-	}
-	if a.llmConfig.APIKey == "" {
-		a.llmConfig.APIKey = os.Getenv("ANTHROPIC_API_KEY")
-	}
-	if a.llmConfig.APIKey == "" {
-		a.llmConfig.APIKey = os.Getenv("OPENAI_API_KEY")
+		for _, env := range []string{"OPENGATEWAY_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"} {
+			if v := os.Getenv(env); v != "" {
+				a.llmConfig.APIKey = v
+				break
+			}
+		}
 	}
 }
 
-// ----- Thread methods --------------------------------------------------------
+// ---- Thread methods ---------------------------------------------------------
 
 func (a *App) ListThreads() ([]Thread, error) {
 	return a.mem.ListThreads()
@@ -86,7 +84,7 @@ func (a *App) GetMessages(threadID string) ([]Message, error) {
 	return a.mem.GetMessages(threadID)
 }
 
-// ----- Agent execution -------------------------------------------------------
+// ---- Agent execution --------------------------------------------------------
 
 func (a *App) RunAgent(threadID, input string) error {
 	a.mu.Lock()
@@ -126,10 +124,11 @@ func (a *App) RunAgent(threadID, input string) error {
 		},
 	}
 
+	// Save user message
+	_ = a.mem.AppendMessage(threadID, Message{Role: "user", Content: input})
+
 	err := Run(ctx, cfg, history, input)
-	if err != nil {
-		_ = a.mem.AppendMessage(threadID, Message{Role: "user", Content: input})
-	}
+	close(eventCh)
 	return err
 }
 
@@ -149,7 +148,7 @@ func (a *App) ApproveAction(approved bool) {
 	}
 }
 
-// ----- LLM config ------------------------------------------------------------
+// ---- LLM config -------------------------------------------------------------
 
 func (a *App) GetLLMConfig() LLMConfigJSON {
 	return a.llmConfig

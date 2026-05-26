@@ -1,21 +1,19 @@
 package app
 
-import "time"
-
-// EventType defines the type of streaming event from the agent
+// EventType defines the type of agent event.
 type EventType string
 
 const (
-	EventThinking       EventType = "thinking"
-	EventToolCall       EventType = "tool_call"
-	EventToolResult     EventType = "tool_result"
-	EventMessage        EventType = "message"
-	EventDone           EventType = "done"
-	EventError          EventType = "error"
-	EventApprovalNeeded EventType = "approval_required"
+	EventThinking         EventType = "thinking"
+	EventToolCall         EventType = "tool_call"
+	EventToolResult       EventType = "tool_result"
+	EventMessage          EventType = "message"
+	EventDone             EventType = "done"
+	EventError            EventType = "error"
+	EventApprovalRequired EventType = "approval_required"
 )
 
-// Event is a single streaming event emitted by the agent loop
+// Event is emitted by the agent loop and forwarded to the frontend.
 type Event struct {
 	Type      EventType   `json:"type"`
 	Content   string      `json:"content"`
@@ -23,30 +21,20 @@ type Event struct {
 	Timestamp int64       `json:"timestamp"`
 }
 
-func NewEvent(t EventType, content string, data interface{}) Event {
-	return Event{
-		Type:      t,
-		Content:   content,
-		Data:      data,
-		Timestamp: time.Now().UnixMilli(),
-	}
-}
-
-// ToolCallData carries info about a tool being called
+// ToolCallData is attached to EventToolCall events.
 type ToolCallData struct {
 	ToolName  string                 `json:"tool_name"`
 	Arguments map[string]interface{} `json:"arguments"`
 }
 
-// ToolResultData carries the result of a tool call
+// ToolResultData is attached to EventToolResult events.
 type ToolResultData struct {
 	ToolName string `json:"tool_name"`
 	Output   string `json:"output"`
-	Error    string `json:"error,omitempty"`
 	Success  bool   `json:"success"`
 }
 
-// ApprovalData is sent when the agent needs human approval before acting
+// ApprovalData is attached to EventApprovalRequired events.
 type ApprovalData struct {
 	ApprovalID  string      `json:"approval_id"`
 	Action      string      `json:"action"`
@@ -54,17 +42,9 @@ type ApprovalData struct {
 	Data        interface{} `json:"data"`
 }
 
-// DiffBlock represents a single changed block in a Notion page
-type DiffBlock struct {
-	Type    string `json:"type"` // "added", "removed", "unchanged"
-	Content string `json:"content"`
-}
-
-// PageDiff is a diff of a Notion page's blocks
+// PageDiff represents a before/after diff of a Notion page.
 type PageDiff struct {
-	PageID    string      `json:"page_id"`
-	PageTitle string      `json:"page_title"`
-	Added     int         `json:"added"`
-	Removed   int         `json:"removed"`
-	Blocks    []DiffBlock `json:"blocks"`
+	PageID string `json:"page_id"`
+	Before string `json:"before"`
+	After  string `json:"after"`
 }
