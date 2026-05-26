@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Thread represents a conversation thread.
@@ -18,19 +18,19 @@ type Thread struct {
 
 // Message represents a single message in a thread.
 type Message struct {
-	Role       string `json:"role"`        // "user" | "assistant" | "tool"
+	Role       string `json:"role"`
 	Content    string `json:"content"`
 	ToolCallID string `json:"tool_id,omitempty"`
 }
 
-// Memory manages persistent storage of threads and messages.
+// Memory manages persistent storage via SQLite.
 type Memory struct {
 	db *sql.DB
 }
 
 // NewMemory opens (or creates) the SQLite database at dbPath.
 func NewMemory(dbPath string) (*Memory, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -49,18 +49,17 @@ func migrate(db *sql.DB) error {
 			updated_at TEXT NOT NULL
 		);
 		CREATE TABLE IF NOT EXISTS messages (
-			id          INTEGER PRIMARY KEY AUTOINCREMENT,
-			thread_id   TEXT NOT NULL,
-			role        TEXT NOT NULL,
-			content     TEXT NOT NULL DEFAULT '',
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			thread_id    TEXT NOT NULL,
+			role         TEXT NOT NULL,
+			content      TEXT NOT NULL DEFAULT '',
 			tool_call_id TEXT NOT NULL DEFAULT '',
-			created_at  TEXT NOT NULL
+			created_at   TEXT NOT NULL
 		);
 	`)
 	return err
 }
 
-// NewThread creates a new thread and returns its ID.
 func (m *Memory) NewThread(title string) (string, error) {
 	id := uuid.NewString()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -74,7 +73,6 @@ func (m *Memory) NewThread(title string) (string, error) {
 	return id, nil
 }
 
-// ListThreads returns all threads, newest first.
 func (m *Memory) ListThreads() ([]Thread, error) {
 	rows, err := m.db.Query(`SELECT id, title, created_at, updated_at FROM threads ORDER BY updated_at DESC`)
 	if err != nil {
@@ -92,7 +90,6 @@ func (m *Memory) ListThreads() ([]Thread, error) {
 	return threads, nil
 }
 
-// DeleteThread removes a thread and all its messages.
 func (m *Memory) DeleteThread(id string) error {
 	_, err := m.db.Exec(`DELETE FROM messages WHERE thread_id = ?`, id)
 	if err != nil {
@@ -102,7 +99,6 @@ func (m *Memory) DeleteThread(id string) error {
 	return err
 }
 
-// GetMessages returns all messages for a thread in order.
 func (m *Memory) GetMessages(threadID string) ([]Message, error) {
 	rows, err := m.db.Query(
 		`SELECT role, content, tool_call_id FROM messages WHERE thread_id = ? ORDER BY id ASC`,
@@ -123,7 +119,6 @@ func (m *Memory) GetMessages(threadID string) ([]Message, error) {
 	return msgs, nil
 }
 
-// AppendMessage saves a message to a thread.
 func (m *Memory) AppendMessage(threadID string, msg Message) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := m.db.Exec(
@@ -133,7 +128,6 @@ func (m *Memory) AppendMessage(threadID string, msg Message) error {
 	if err != nil {
 		return err
 	}
-	// Update thread timestamp
 	_, _ = m.db.Exec(`UPDATE threads SET updated_at = ? WHERE id = ?`, now, threadID)
 	return nil
 }
