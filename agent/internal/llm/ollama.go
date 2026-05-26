@@ -105,7 +105,7 @@ func (o *ollamaProvider) Chat(ctx context.Context, cfg Config, messages []Messag
 				continue
 			}
 			if msg, ok := evt["message"].(map[string]interface{}); ok {
-				token := str(msg["content"])
+				token := strVal(msg["content"])
 				fullText.WriteString(token)
 				ch <- Delta{Type: DeltaText, Text: token}
 			}
