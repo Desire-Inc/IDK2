@@ -19,9 +19,8 @@ export default function AgentStream({ chatEvent }: Props) {
   return (
     <motion.div initial={fadeIn} animate={fadeVisible} transition={fadeTrans}>
 
-      {/* User message */}
       {ev.type === 'user' && (
-        <div className="flex justify-end">
+        <div className="flex justify-end mb-1">
           <div className="flex items-start gap-2 max-w-[80%]">
             <div className="bg-notion-accent/15 rounded-notion px-4 py-2.5 text-sm text-notion-text">
               {ev.content}
@@ -31,7 +30,6 @@ export default function AgentStream({ chatEvent }: Props) {
         </div>
       )}
 
-      {/* Thinking */}
       {ev.type === 'thinking' && (
         <div className="flex items-center gap-2 text-notion-muted text-xs py-0.5 pl-1">
           <span className="animate-pulse text-notion-accent">●</span>
@@ -39,20 +37,18 @@ export default function AgentStream({ chatEvent }: Props) {
         </div>
       )}
 
-      {/* Assistant message */}
       {ev.type === 'message' && (
         <div className="bg-notion-panel rounded-notion px-4 py-3 text-sm text-notion-text">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
-              // Prevent raw HTML injection
-              p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
-              ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
-              ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
-              li: ({ children }) => <li className="text-notion-text">{children}</li>,
-              strong: ({ children }) => <strong className="font-semibold text-notion-text">{children}</strong>,
+              p: (props) => <p className="mb-2 last:mb-0 leading-relaxed" {...props} />,
+              ul: (props) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+              ol: (props) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+              li: (props) => <li className="text-notion-text" {...props} />,
+              strong: (props) => <strong className="font-semibold" {...props} />,
               code: ({ children, className }) => {
-                const isBlock = className?.includes('language-')
+                const isBlock = Boolean(className?.includes('language-'))
                 return isBlock
                   ? <code className="block bg-notion-bg rounded p-3 text-xs font-mono overflow-x-auto my-2">{children}</code>
                   : <code className="bg-notion-bg px-1 py-0.5 rounded text-xs font-mono">{children}</code>
@@ -64,7 +60,6 @@ export default function AgentStream({ chatEvent }: Props) {
         </div>
       )}
 
-      {/* Tool call */}
       {ev.type === 'tool_call' && (
         <div className="flex items-center gap-2 py-0.5 pl-1">
           <Terminal size={12} className="text-notion-accent flex-shrink-0" />
@@ -75,12 +70,11 @@ export default function AgentStream({ chatEvent }: Props) {
         </div>
       )}
 
-      {/* Tool result */}
       {ev.type === 'tool_result' && (() => {
         const d = ev.data as ToolResultData
         return (
           <div className={clsx(
-            'rounded-notion px-3 py-2 text-xs font-mono flex items-start gap-2 max-h-32 overflow-y-auto',
+            'rounded-notion px-3 py-2 text-xs font-mono flex items-start gap-2 max-h-40 overflow-y-auto',
             d?.success ? 'bg-notion-green/10 text-notion-green' : 'bg-notion-red/10 text-notion-red'
           )}>
             {d?.success
@@ -91,7 +85,6 @@ export default function AgentStream({ chatEvent }: Props) {
         )
       })()}
 
-      {/* Done */}
       {ev.type === 'done' && (
         <div className="flex items-center gap-1.5 text-notion-green text-xs py-0.5 pl-1">
           <Zap size={11} />
@@ -99,7 +92,6 @@ export default function AgentStream({ chatEvent }: Props) {
         </div>
       )}
 
-      {/* Error */}
       {ev.type === 'error' && (
         <div className="flex items-start gap-2 bg-notion-red/10 rounded-notion px-3 py-2">
           <AlertCircle size={13} className="mt-0.5 flex-shrink-0 text-notion-red" />
