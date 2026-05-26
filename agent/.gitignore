@@ -1,0 +1,23 @@
+# Binaries
+notion-agent
+notion-agent.exe
+build/
+
+# Go
+*.test
+vendor/
+
+# Frontend
+frontend/dist/
+frontend/node_modules/
+
+# Config / secrets
+.env
+*.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# SQLite
+*.db
