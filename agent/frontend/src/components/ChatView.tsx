@@ -3,6 +3,7 @@ import { Send } from 'lucide-react'
 import { useAgentStore } from '../store'
 import { useAgent } from '../hooks/useAgent'
 import AgentStream from './AgentStream'
+import { ChatEvent } from '../types'
 
 export default function ChatView() {
   const activeThreadId = useAgentStore((s) => s.activeThreadId)
@@ -32,6 +33,12 @@ export default function ChatView() {
     }
   }
 
+  // Build ChatEvent objects outside JSX to avoid inline double-brace syntax
+  const chatEvents: ChatEvent[] = events.map((ev, i) => ({
+    id: String(i),
+    event: ev,
+  }))
+
   return (
     <div className="flex flex-col h-full bg-notion-bg">
       {/* Header */}
@@ -44,15 +51,15 @@ export default function ChatView() {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-        {events.length === 0 && (
+        {chatEvents.length === 0 && (
           <div className="flex items-center justify-center h-full">
             <p className="text-notion-muted text-sm text-center">
               Digite uma tarefa para o agente executar.
             </p>
           </div>
         )}
-        {events.map((ev, i) => (
-          <AgentStream key={i} chatEvent= id: String(i), event: ev  />
+        {chatEvents.map((ce) => (
+          <AgentStream key={ce.id} chatEvent={ce} />
         ))}
         <div ref={bottomRef} />
       </div>
