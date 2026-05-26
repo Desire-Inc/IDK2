@@ -18,8 +18,8 @@ body,
 
 body {
   font-family: 'Inter', sans-serif;
-  background: #0b0d10;
-  color: #eef2f8;
+  background: #191919;
+  color: #e6e6e5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
@@ -27,28 +27,27 @@ body {
 }
 
 ::selection {
-  background: rgba(124, 92, 255, 0.32);
+  background: rgba(35, 131, 226, 0.28);
   color: #ffffff;
 }
 
-/* Codex-like low-noise scrollbar */
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.32);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 *:focus-visible {
-  outline: 2px solid rgba(124, 92, 255, 0.9);
+  outline: 2px solid #2383e2;
   outline-offset: 2px;
 }
 
@@ -71,16 +70,16 @@ textarea {
 }
 
 .prose-notion {
-  @apply text-codex-text leading-relaxed;
+  @apply text-notion-text leading-relaxed;
 }
 .prose-notion p {
   @apply mb-2;
 }
 .prose-notion code {
-  @apply bg-codex-bg px-1.5 py-0.5 rounded-md text-sm font-mono text-codex-text border border-codex-border;
+  @apply bg-notion-bg px-1.5 py-0.5 rounded text-sm font-mono text-notion-text border border-notion-border;
 }
 .prose-notion pre {
-  @apply bg-codex-bg rounded-2xl p-4 overflow-x-auto mb-3 border border-codex-border;
+  @apply bg-notion-bg rounded-notion p-4 overflow-x-auto mb-3 border border-notion-border;
 }
 .prose-notion h1, .prose-notion h2, .prose-notion h3 {
   @apply font-semibold mb-2 mt-4;
@@ -92,5 +91,5 @@ textarea {
   @apply mb-0.5;
 }
 .prose-notion a {
-  @apply text-codex-blue hover:underline;
+  @apply text-notion-accent hover:underline;
 }

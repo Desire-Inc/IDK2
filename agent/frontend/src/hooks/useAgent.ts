@@ -1,20 +1,17 @@
 import { useEffect, useRef } from 'react'
 import { useAgentStore } from '../store'
 
-// Wails injects `window.runtime` at startup.
-// We wrap calls so TypeScript is happy without needing node types.
 const wailsRuntime = () => (window as any).runtime as {
   EventsOn: (event: string, cb: (data: any) => void) => void
   EventsOff: (event: string) => void
 } | undefined
 
-// Wails Go bindings are generated into frontend/wailsjs/go/app/App.js
-// They are available globally as window["go"]["app"]["App"] at runtime.
 const App = () => (window as any)?.go?.app?.App as {
   NewThread: (title: string) => Promise<string>
   GetThreads: () => Promise<any[]>
   DeleteThread: (id: string) => Promise<void>
   SendMessage: (threadID: string, message: string) => Promise<void>
+  StopRun: (threadID: string) => Promise<void>
   ApproveAction: (approved: boolean) => Promise<void>
   SaveConfig: (cfg: any) => Promise<void>
   GetConfig: () => Promise<any>
@@ -31,18 +28,34 @@ export function useAgent() {
 
   const registered = useRef(false)
 
+  const refreshThreads = async () => {
+    const threads = await App()?.GetThreads()
+    if (threads) setThreads(threads)
+  }
+
   useEffect(() => {
-    // Load threads on mount
     App()?.GetThreads().then(setThreads).catch(console.error)
+    App()?.GetConfig().then((cfg) => cfg && setLLMConfig(cfg)).catch(console.error)
 
     if (registered.current) return
     registered.current = true
 
     wailsRuntime()?.EventsOn('agent:event', (payload: any) => {
       const { thread_id, type, content, data } = payload
-      if (type === 'done') { setRunning(false); return }
-      if (type === 'approval_required') { setPending(data); return }
+      if (type === 'approval_required') {
+        addEvent(thread_id, { type, content, data })
+        setPending(data)
+        return
+      }
+      if (type === 'title_updated') {
+        refreshThreads().catch(console.error)
+        return
+      }
       addEvent(thread_id, { type, content, data })
+      if (type === 'done' || type === 'cancelled' || type === 'error') {
+        setRunning(false)
+        refreshThreads().catch(console.error)
+      }
     })
 
     return () => {
@@ -84,6 +97,12 @@ export function useAgent() {
     }
   }
 
+  const stopRun = async () => {
+    if (!activeId) return
+    await App()?.StopRun(activeId)
+    setRunning(false)
+  }
+
   const approveAction = async (approved: boolean) => {
     setPending(null)
     await App()?.ApproveAction(approved)
@@ -94,5 +113,5 @@ export function useAgent() {
     setLLMConfig(config)
   }
 
-  return { newThread, deleteThread, sendMessage, approveAction, saveConfig }
+  return { newThread, deleteThread, sendMessage, stopRun, approveAction, saveConfig }
 }
