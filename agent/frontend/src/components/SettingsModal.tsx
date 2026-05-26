@@ -56,11 +56,10 @@ export default function SettingsModal() {
           initial= opacity: 0, scale: 0.95, y: 8 
           animate= opacity: 1, scale: 1, y: 0 
           exit= opacity: 0, scale: 0.95, y: 8 
-          transition= duration: 0.15 
+          transition= duration: 0.18, ease: 'easeOut' 
           className="bg-notion-surface rounded-notion shadow-2xl border border-notion-border w-[480px] p-6"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Header */}
           <div className="flex items-center justify-between mb-5">
             <h2 className="font-semibold text-notion-text">Configurações</h2>
             <button
@@ -71,7 +70,6 @@ export default function SettingsModal() {
             </button>
           </div>
 
-          {/* Provider */}
           <label className="block mb-4">
             <div className="flex items-center gap-1.5 text-xs text-notion-muted mb-1.5">
               <Cpu size={12} />
@@ -89,7 +87,6 @@ export default function SettingsModal() {
             </select>
           </label>
 
-          {/* Model */}
           <label className="block mb-4">
             <div className="text-xs text-notion-muted mb-1.5">Modelo</div>
             <input
@@ -104,7 +101,6 @@ export default function SettingsModal() {
             </datalist>
           </label>
 
-          {/* Base URL */}
           {showBaseURL && (
             <label className="block mb-4">
               <div className="flex items-center gap-1.5 text-xs text-notion-muted mb-1.5">
@@ -120,7 +116,6 @@ export default function SettingsModal() {
             </label>
           )}
 
-          {/* API Key */}
           {showAPIKey && (
             <label className="block mb-5">
               <div className="flex items-center gap-1.5 text-xs text-notion-muted mb-1.5">
@@ -137,7 +132,6 @@ export default function SettingsModal() {
             </label>
           )}
 
-          {/* Actions */}
           <div className="flex gap-2 justify-end">
             <button
               onClick={() => setShowSettings(false)}

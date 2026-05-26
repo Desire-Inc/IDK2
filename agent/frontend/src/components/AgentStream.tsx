@@ -49,12 +49,10 @@ export default function AgentStream({ chatEvent }: Props) {
       {event.type === 'tool_result' && (() => {
         const d = event.data as ToolResultData
         return (
-          <div
-            className={clsx(
-              'rounded-notion px-3 py-2 text-xs font-mono flex items-start gap-2',
-              d?.success ? 'bg-notion-green/10 text-notion-green' : 'bg-notion-red/10 text-notion-red'
-            )}
-          >
+          <div className={clsx(
+            'rounded-notion px-3 py-2 text-xs font-mono flex items-start gap-2',
+            d?.success ? 'bg-notion-green/10 text-notion-green' : 'bg-notion-red/10 text-notion-red'
+          )}>
             {d?.success
               ? <CheckCircle size={12} className="mt-0.5 flex-shrink-0" />
               : <XCircle size={12} className="mt-0.5 flex-shrink-0" />}

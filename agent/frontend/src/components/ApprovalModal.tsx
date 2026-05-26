@@ -21,7 +21,7 @@ export default function ApprovalModal() {
           initial= opacity: 0, scale: 0.95, y: 8 
           animate= opacity: 1, scale: 1, y: 0 
           exit= opacity: 0, scale: 0.95, y: 8 
-          transition= duration: 0.15 
+          transition= duration: 0.18, ease: 'easeOut' 
           className="bg-notion-surface rounded-notion shadow-2xl border border-notion-border w-[440px] p-6"
         >
           <div className="flex items-center gap-3 mb-4">

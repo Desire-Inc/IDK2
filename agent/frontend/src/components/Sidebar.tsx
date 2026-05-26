@@ -15,13 +15,12 @@ export default function Sidebar() {
 
   return (
     <aside className="w-[220px] flex-shrink-0 flex flex-col bg-notion-bg border-r border-notion-border h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 pt-4 pb-2 drag-region">
+      <div className="flex items-center justify-between px-3 pt-4 pb-2">
         <span className="text-xs font-semibold uppercase tracking-widest text-notion-muted">
           Notion Agent
         </span>
         <button
-          className="no-drag p-1 rounded hover:bg-notion-hover text-notion-muted hover:text-notion-text transition-colors"
+          className="p-1 rounded hover:bg-notion-hover text-notion-muted hover:text-notion-text transition-colors"
           onClick={newThread}
           title="Nova conversa"
         >
@@ -29,7 +28,6 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* Thread list */}
       <div className="flex-1 overflow-y-auto px-1 py-1">
         <AnimatePresence>
           {threads.length === 0 && (
@@ -41,9 +39,9 @@ export default function Sidebar() {
           {threads.map((thread) => (
             <motion.div
               key={thread.id}
-              initial= opacity: 0, x: -8 
+              initial= opacity: 0, x: -6 
               animate= opacity: 1, x: 0 
-              exit= opacity: 0, x: -8 
+              exit= opacity: 0, x: -6 
               transition= duration: 0.15 
               className={clsx(
                 'group flex items-center gap-2 px-2.5 py-1.5 rounded-notion cursor-pointer text-sm mb-0.5 transition-colors',
@@ -61,11 +59,8 @@ export default function Sidebar() {
               </span>
               {hovered === thread.id && (
                 <button
-                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-notion-red rounded transition"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    deleteThread(thread.id)
-                  }}
+                  className="p-0.5 hover:text-notion-red rounded transition"
+                  onClick={(e) => { e.stopPropagation(); deleteThread(thread.id) }}
                 >
                   <Trash2 size={11} />
                 </button>
@@ -75,7 +70,6 @@ export default function Sidebar() {
         </AnimatePresence>
       </div>
 
-      {/* Footer */}
       <div className="border-t border-notion-border px-2 py-2">
         <button
           onClick={() => setShowSettings(true)}
