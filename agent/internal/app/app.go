@@ -2,191 +2,131 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"os"
-	"sync"
+	"path/filepath"
 
 	"github.com/Desire-Inc/notion-agent/internal/llm"
-	"github.com/Desire-Inc/notion-agent/internal/tools"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// LLMConfigJSON is the LLM configuration stored in the app.
-type LLMConfigJSON struct {
-	Provider string `json:"provider"` // "openai_compatible" | "anthropic" | "openai" | "ollama"
-	Model    string `json:"model"`
-	APIKey   string `json:"api_key"`
-	BaseURL  string `json:"base_url"`
-}
-
-var defaultLLMConfig = LLMConfigJSON{
-	Provider: "openai_compatible",
-	Model:    "mimo-v2.5-pro",
-	APIKey:   "",
-	BaseURL:  "https://opengateway.gitlawb.com/v1",
-}
-
-// App is the main Wails application struct.
+// App is the main application struct exposed to Wails.
 type App struct {
-	ctx        context.Context
-	mem        *Memory
-	registry   *tools.Registry
-	llmConfig  LLMConfigJSON
-
-	mu         sync.Mutex
-	cancel     context.CancelFunc
-	approvalCh chan bool
+	ctx     context.Context
+	mem     *Memory
+	llm     llm.Provider
+	cfgPath string
 }
 
+// NewApp creates a new App instance.
 func NewApp() *App {
-	mem, err := NewMemory("notion-agent.db")
+	home, _ := os.UserHomeDir()
+	dataDir := filepath.Join(home, ".notion-agent")
+	_ = os.MkdirAll(dataDir, 0700)
+
+	mem, err := NewMemory(filepath.Join(dataDir, "memory.db"))
 	if err != nil {
 		panic(err)
 	}
+
+	cfgPath := filepath.Join(dataDir, "config.json")
+	cfg := loadConfig(cfgPath)
+	provider := llm.NewProviderFromConfig(llm.LLMConfig{
+		Provider: cfg.Provider,
+		Model:    cfg.Model,
+		APIKey:   cfg.APIKey,
+		BaseURL:  cfg.BaseURL,
+	})
+
 	return &App{
-		mem:        mem,
-		registry:   tools.NewRegistry(),
-		llmConfig:  defaultLLMConfig,
-		approvalCh: make(chan bool, 1),
+		mem:     mem,
+		llm:     provider,
+		cfgPath: cfgPath,
 	}
 }
 
 // Startup is called by Wails when the app starts.
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
-	for _, env := range []string{"OPENGATEWAY_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"} {
-		if v := os.Getenv(env); v != "" {
-			a.llmConfig.APIKey = v
-			break
-		}
-	}
 }
 
 // Shutdown is called by Wails when the app closes.
-func (a *App) Shutdown(ctx context.Context) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.cancel != nil {
-		a.cancel()
-	}
-	if a.mem != nil && a.mem.db != nil {
-		_ = a.mem.db.Close()
-	}
-}
+func (a *App) Shutdown(ctx context.Context) {}
 
-// ---- Thread methods ---------------------------------------------------------
-
-func (a *App) ListThreads() ([]Thread, error) {
-	return a.mem.ListThreads()
-}
-
+// NewThread creates a new conversation thread.
 func (a *App) NewThread(title string) (string, error) {
-	if title == "" {
-		title = "Nova conversa"
-	}
 	return a.mem.NewThread(title)
 }
 
-func (a *App) DeleteThread(threadID string) error {
-	return a.mem.DeleteThread(threadID)
+// GetThreads returns all threads ordered by most recent.
+func (a *App) GetThreads() ([]Thread, error) {
+	return a.mem.ListThreads()
 }
 
-func (a *App) GetMessages(threadID string) ([]Message, error) {
-	return a.mem.GetMessages(threadID)
+// DeleteThread deletes a thread and all its messages.
+func (a *App) DeleteThread(id string) error {
+	return a.mem.DeleteThread(id)
 }
 
-// ---- Agent execution --------------------------------------------------------
-
-func (a *App) RunAgent(threadID, input string) error {
-	a.mu.Lock()
-	if a.cancel != nil {
-		a.cancel()
-	}
-	ctx, cancel := context.WithCancel(a.ctx)
-	a.cancel = cancel
-	a.mu.Unlock()
-
-	provider := a.buildProvider()
-
-	eventCh := make(chan Event, 200)
-	go func() {
-		for event := range eventCh {
-			runtime.EventsEmit(a.ctx, "agent:event", event)
-			if event.Type == EventApprovalRequired {
-				runtime.EventsEmit(a.ctx, "agent:approval_required", event.Data)
-			}
-		}
-	}()
-
-	history, _ := a.mem.GetMessages(threadID)
-
-	cfg := LoopConfig{
-		MaxIterations: 30,
-		LLMProvider:   provider,
-		Registry:      a.registry,
-		EventChan:     eventCh,
-		ApprovalFn: func(data ApprovalData) bool {
-			select {
-			case approved := <-a.approvalCh:
-				return approved
-			case <-ctx.Done():
-				return false
-			}
-		},
-	}
-
-	_ = a.mem.AppendMessage(threadID, Message{Role: "user", Content: input})
-
-	err := Run(ctx, cfg, history, input)
-	close(eventCh)
-	return err
+// SendMessage runs the agent loop in the background.
+func (a *App) SendMessage(threadID string, message string) error {
+	go a.runLoop(a.ctx, threadID, message)
+	return nil
 }
 
-func (a *App) StopAgent() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.cancel != nil {
-		a.cancel()
-		a.cancel = nil
-	}
-}
-
+// ApproveAction signals approval/denial for a pending tool action.
 func (a *App) ApproveAction(approved bool) {
 	select {
-	case a.approvalCh <- approved:
+	case approvalCh <- approved:
 	default:
 	}
 }
 
-// ---- LLM config -------------------------------------------------------------
+var approvalCh = make(chan bool, 1)
 
-func (a *App) GetLLMConfig() LLMConfigJSON {
-	return a.llmConfig
+// LLMConfigJSON is the shape persisted to disk and sent to the frontend.
+type LLMConfigJSON struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	APIKey   string `json:"api_key"`
+	BaseURL  string `json:"base_url"`
 }
 
-func (a *App) SetLLMConfig(cfg LLMConfigJSON) {
-	a.llmConfig = cfg
-}
-
-func (a *App) GetAvailableModels() map[string][]string {
-	return map[string][]string{
-		"openai_compatible": {"mimo-v2.5-pro", "gpt-4o", "gpt-4o-mini"},
-		"anthropic":         {"claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"},
-		"openai":            {"gpt-4o", "gpt-4o-mini", "o3-mini"},
-		"ollama":            {"llama3", "mixtral", "codestral"},
+func loadConfig(path string) LLMConfigJSON {
+	def := LLMConfigJSON{
+		Provider: "openai_compatible",
+		Model:    "mimo-v2.5-pro",
+		BaseURL:  "https://opengateway.gitlawb.com/v1",
 	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return def
+	}
+	var cfg LLMConfigJSON
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return def
+	}
+	return cfg
 }
 
-func (a *App) buildProvider() llm.Provider {
-	switch a.llmConfig.Provider {
-	case "openai_compatible":
-		return llm.NewOpenAICompatible(a.llmConfig.APIKey, a.llmConfig.BaseURL, a.llmConfig.Model)
-	case "openai":
-		return llm.NewOpenAI(a.llmConfig.APIKey, a.llmConfig.Model)
-	case "anthropic":
-		return llm.NewAnthropic(a.llmConfig.APIKey, a.llmConfig.Model)
-	case "ollama":
-		return llm.NewOllama(a.llmConfig.BaseURL, a.llmConfig.Model)
-	default:
-		return llm.NewOpenAICompatible(a.llmConfig.APIKey, a.llmConfig.BaseURL, a.llmConfig.Model)
+// SaveConfig saves the LLM config to disk and reloads the provider.
+func (a *App) SaveConfig(cfg LLMConfigJSON) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
 	}
+	if err := os.WriteFile(a.cfgPath, data, 0600); err != nil {
+		return err
+	}
+	a.llm = llm.NewProviderFromConfig(llm.LLMConfig{
+		Provider: cfg.Provider,
+		Model:    cfg.Model,
+		APIKey:   cfg.APIKey,
+		BaseURL:  cfg.BaseURL,
+	})
+	return nil
+}
+
+// GetConfig returns the current LLM config.
+func (a *App) GetConfig() LLMConfigJSON {
+	return loadConfig(a.cfgPath)
 }

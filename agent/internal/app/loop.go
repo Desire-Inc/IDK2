@@ -10,20 +10,19 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const systemPrompt = `You are an autonomous AI agent — a powerful coding and productivity assistant similar to Claude or Codex.
+const systemPrompt = `You are an autonomous AI agent — a powerful coding and productivity assistant.
 
 You can:
 - Write, read, edit and execute code in any language
 - Create, read, update and delete files on the local filesystem
 - Run terminal commands and scripts
-- Search the web and browse URLs
 - Manage Notion workspaces: create pages, databases, query data
 - Interact with Git repositories
-- Plan and execute multi-step tasks autonomously
+- Plan and execute complex multi-step tasks autonomously
 
-You think step by step. When given a task, you break it down, use the available tools, and complete it fully.
+Think step by step. Break down tasks, use your tools, and complete them fully.
 Always respond in the same language the user writes in.
-Be concise but complete. Show your work when it's helpful.`
+Be concise but complete.`
 
 func (a *App) runLoop(ctx context.Context, threadID string, userMsg string) {
 	emit := func(eventType, content string, data any) {
@@ -36,14 +35,12 @@ func (a *App) runLoop(ctx context.Context, threadID string, userMsg string) {
 		runtime.EventsEmit(ctx, "agent:event", payload)
 	}
 
-	// Append user message to memory
 	if err := a.mem.AppendMessage(threadID, Message{Role: "user", Content: userMsg}); err != nil {
 		emit("error", fmt.Sprintf("memory error: %v", err), nil)
 		return
 	}
 
 	for iteration := 0; iteration < 20; iteration++ {
-		// Build message history
 		history, err := a.mem.GetMessages(threadID)
 		if err != nil {
 			emit("error", fmt.Sprintf("memory error: %v", err), nil)
@@ -66,8 +63,8 @@ func (a *App) runLoop(ctx context.Context, threadID string, userMsg string) {
 			msgs = append(msgs, llm.Message{Role: role, Content: m.Content, ToolCallID: m.ToolCallID})
 		}
 
-		// Call LLM
 		emit("thinking", "Pensando...", nil)
+
 		resp, err := a.llm.Chat(ctx, llm.ChatRequest{
 			System:   systemPrompt,
 			Messages: msgs,
@@ -78,7 +75,6 @@ func (a *App) runLoop(ctx context.Context, threadID string, userMsg string) {
 			return
 		}
 
-		// No tool calls — final answer
 		if len(resp.ToolCalls) == 0 {
 			if resp.Content != "" {
 				_ = a.mem.AppendMessage(threadID, Message{Role: "assistant", Content: resp.Content})
@@ -88,11 +84,10 @@ func (a *App) runLoop(ctx context.Context, threadID string, userMsg string) {
 			return
 		}
 
-		// Save assistant turn (tool calls as JSON)
+		// Save assistant turn with tool calls
 		assistantJSON, _ := json.Marshal(resp.ToolCalls)
 		_ = a.mem.AppendMessage(threadID, Message{Role: "assistant", Content: string(assistantJSON)})
 
-		// Execute each tool call
 		for _, tc := range resp.ToolCalls {
 			emit("tool_call", fmt.Sprintf("Executando %s", tc.Name), map[string]any{
 				"tool_name": tc.Name,
@@ -105,8 +100,6 @@ func (a *App) runLoop(ctx context.Context, threadID string, userMsg string) {
 			if execErr != nil {
 				outputStr = execErr.Error()
 			}
-
-			// Truncate very long outputs
 			if len(outputStr) > 4000 {
 				outputStr = outputStr[:4000] + "\n... [truncado]"
 			}

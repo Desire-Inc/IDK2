@@ -1,76 +1,59 @@
 package llm
 
-import "context"
-
-// Provider is the interface all LLM adapters must implement.
-type Provider interface {
-	// Chat sends a list of messages and streams back tokens/tool calls.
-	Chat(ctx context.Context, cfg Config, messages []Message, tools []ToolDefinition) (<-chan Delta, error)
-	// Name returns a human-readable name for the provider.
-	Name() string
-	// Model returns the active model name.
-	Model() string
-}
-
-// ----- Message ---------------------------------------------------------------
-
-type Role string
-
-const (
-	RoleUser      Role = "user"
-	RoleAssistant Role = "assistant"
-	RoleTool      Role = "tool"
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 )
 
-type Message struct {
-	Role       Role
-	Content    string
-	ToolCalls  []ToolCall
-	ToolCallID string // only for role=tool responses
+// Config holds provider settings (mirrors app.LLMConfigJSON).
+type Config interface {
+	GetProvider() string
+	GetModel() string
+	GetAPIKey() string
+	GetBaseURL() string
 }
 
-// ----- Tool definitions ------------------------------------------------------
-
-type ToolDefinition struct {
-	Name        string
-	Description string
-	Parameters  map[string]interface{} // JSON Schema object
+// openAICompatProvider works with any OpenAI-compatible API.
+type openAICompatProvider struct {
+	model   string
+	apiKey  string
+	baseURL string
+	client  *http.Client
 }
 
-type ToolCall struct {
-	ID        string
-	Name      string
-	Arguments string // raw JSON
+func (p *openAICompatProvider) GetProvider() string { return "openai_compatible" }
+func (p *openAICompatProvider) GetModel() string    { return p.model }
+func (p *openAICompatProvider) GetAPIKey() string   { return p.apiKey }
+func (p *openAICompatProvider) GetBaseURL() string  { return p.baseURL }
+
+// cfgAdapter adapts LLMConfigJSON (from app package) without creating a circular import.
+type cfgAdapter struct {
+	provider string
+	model    string
+	apiKey   string
+	baseURL  string
 }
 
-// ----- Streaming delta -------------------------------------------------------
-
-type DeltaType string
-
-const (
-	DeltaText      DeltaType = "text"
-	DeltaToolCall  DeltaType = "tool_call"
-	DeltaThinking  DeltaType = "thinking"
-	DeltaDone      DeltaType = "done"
-)
-
-type Delta struct {
-	Type     DeltaType
-	Text     string
-	ToolCall *ToolCall
-	Error    error
-}
-
-// ----- Config ----------------------------------------------------------------
-
-type Config struct {
-	Temperature float64
-	MaxTokens   int
-	SystemPrompt string
-}
-
-var DefaultConfig = Config{
-	Temperature:  0.7,
-	MaxTokens:    8192,
-	SystemPrompt: "",
+// NewProvider creates the appropriate Provider from a config struct.
+// cfg must have fields: Provider, Model, APIKey, BaseURL (string fields).
+func NewProvider(cfg interface{ 
+	GetProviderStr() string
+	GetModelStr() string
+	GetAPIKeyStr() string
+	GetBaseURLStr() string
+}) Provider {
+	p := &openAICompatProvider{
+		model:   cfg.GetModelStr(),
+		apiKey:  cfg.GetAPIKeyStr(),
+		baseURL: cfg.GetBaseURLStr(),
+		client:  &http.Client{},
+	}
+	if p.baseURL == "" {
+		p.baseURL = "https://api.openai.com/v1"
+	}
+	return p
 }
