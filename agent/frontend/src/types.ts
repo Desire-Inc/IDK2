@@ -12,6 +12,13 @@ export type LLMConfig = {
   base_url?: string
 }
 
+// Legacy exports so old imports don't break
+export type AgentStatus = 'idle' | 'running' | 'done' | 'error'
+export type ApprovalData = {
+  action: string
+  description: string
+}
+
 export type EventType =
   | 'user'
   | 'thinking'
@@ -25,6 +32,7 @@ export type EventType =
 export type ToolCallData = {
   tool_name: string
   args: Record<string, unknown>
+  arguments?: string
 }
 
 export type ToolResultData = {
