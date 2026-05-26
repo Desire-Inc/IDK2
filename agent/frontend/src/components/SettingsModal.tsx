@@ -1,14 +1,20 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Key, Cpu } from 'lucide-react'
+import { X, Key, Cpu, Link } from 'lucide-react'
 import { useAgentStore } from '../store'
 import { useAgent } from '../hooks/useAgent'
 import { LLMConfig } from '../types'
 
 const PROVIDER_MODELS: Record<string, string[]> = {
+  openai_compatible: ['mimo-v2.5-pro', 'gpt-4o', 'gpt-4o-mini'],
   anthropic: ['claude-sonnet-4-5', 'claude-opus-4-5', 'claude-haiku-4-5'],
   openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
   ollama: ['llama3', 'mixtral', 'codestral'],
+}
+
+const PROVIDER_DEFAULT_URLS: Record<string, string> = {
+  openai_compatible: 'https://opengateway.gitlawb.com/v1',
+  ollama: 'http://localhost:11434',
 }
 
 export default function SettingsModal() {
@@ -23,6 +29,17 @@ export default function SettingsModal() {
   }, [llmConfig])
 
   const models = PROVIDER_MODELS[config.provider] ?? []
+  const showBaseURL = config.provider === 'openai_compatible' || config.provider === 'ollama'
+  const showAPIKey = config.provider !== 'ollama'
+
+  const handleProviderChange = (provider: string) => {
+    setConfig((c) => ({
+      ...c,
+      provider: provider as LLMConfig['provider'],
+      model: PROVIDER_MODELS[provider]?.[0] ?? '',
+      base_url: PROVIDER_DEFAULT_URLS[provider] ?? '',
+    }))
+  }
 
   const handleSave = async () => {
     await saveConfig(config)
@@ -39,11 +56,11 @@ export default function SettingsModal() {
         onClick={() => setShowSettings(false)}
       >
         <motion.div
-          initial= opacity: 0, scale: 0.96, y: 12 
-          animate= opacity: 1, scale: 1, y: 0 
-          exit= opacity: 0, scale: 0.96, y: 12 
-          transition= type: 'spring', stiffness: 380, damping: 30 
-          className="bg-notion-surface rounded-notion shadow-2xl border border-notion-border w-[460px] p-6"
+          initial= scale: 0.95, opacity: 0 
+          animate= scale: 1, opacity: 1 
+          exit= scale: 0.95, opacity: 0 
+          transition= duration: 0.15 
+          className="bg-notion-surface rounded-notion shadow-2xl border border-notion-border w-[480px] p-6"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -66,14 +83,9 @@ export default function SettingsModal() {
             <select
               className="w-full bg-notion-panel border border-notion-border rounded-notion px-3 py-2 text-sm text-notion-text outline-none focus:border-notion-accent transition-colors"
               value={config.provider}
-              onChange={(e) =>
-                setConfig((c) => ({
-                  ...c,
-                  provider: e.target.value as LLMConfig['provider'],
-                  model: PROVIDER_MODELS[e.target.value]?.[0] ?? '',
-                }))
-              }
+              onChange={(e) => handleProviderChange(e.target.value)}
             >
+              <option value="openai_compatible">Gitlawb Opengateway (padrão)</option>
               <option value="anthropic">Anthropic (Claude)</option>
               <option value="openai">OpenAI (GPT)</option>
               <option value="ollama">Ollama (Local)</option>
@@ -83,19 +95,36 @@ export default function SettingsModal() {
           {/* Model */}
           <label className="block mb-4">
             <div className="text-xs text-notion-muted mb-1.5">Modelo</div>
-            <select
-              className="w-full bg-notion-panel border border-notion-border rounded-notion px-3 py-2 text-sm text-notion-text outline-none focus:border-notion-accent transition-colors"
+            <input
+              className="w-full bg-notion-panel border border-notion-border rounded-notion px-3 py-2 text-sm text-notion-text outline-none focus:border-notion-accent transition-colors placeholder-notion-muted"
               value={config.model}
               onChange={(e) => setConfig((c) => ({ ...c, model: e.target.value }))}
-            >
-              {models.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+              placeholder={PROVIDER_MODELS[config.provider]?.[0] ?? 'nome-do-modelo'}
+              list="model-suggestions"
+            />
+            <datalist id="model-suggestions">
+              {models.map((m) => <option key={m} value={m} />)}
+            </datalist>
           </label>
 
+          {/* Base URL (OpenAI-compatible / Ollama) */}
+          {showBaseURL && (
+            <label className="block mb-4">
+              <div className="flex items-center gap-1.5 text-xs text-notion-muted mb-1.5">
+                <Link size={12} />
+                Endpoint URL
+              </div>
+              <input
+                className="w-full bg-notion-panel border border-notion-border rounded-notion px-3 py-2 text-sm text-notion-text outline-none focus:border-notion-accent transition-colors placeholder-notion-muted"
+                value={config.base_url ?? ''}
+                onChange={(e) => setConfig((c) => ({ ...c, base_url: e.target.value }))}
+                placeholder={PROVIDER_DEFAULT_URLS[config.provider] ?? 'https://...'}
+              />
+            </label>
+          )}
+
           {/* API Key */}
-          {config.provider !== 'ollama' && (
+          {showAPIKey && (
             <label className="block mb-5">
               <div className="flex items-center gap-1.5 text-xs text-notion-muted mb-1.5">
                 <Key size={12} />
@@ -104,22 +133,9 @@ export default function SettingsModal() {
               <input
                 type="password"
                 className="w-full bg-notion-panel border border-notion-border rounded-notion px-3 py-2 text-sm text-notion-text outline-none focus:border-notion-accent transition-colors placeholder-notion-muted"
-                placeholder={config.provider === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
+                placeholder="sua-api-key..."
                 value={config.api_key ?? ''}
                 onChange={(e) => setConfig((c) => ({ ...c, api_key: e.target.value }))}
-              />
-            </label>
-          )}
-
-          {/* Ollama URL */}
-          {config.provider === 'ollama' && (
-            <label className="block mb-5">
-              <div className="text-xs text-notion-muted mb-1.5">URL do Ollama</div>
-              <input
-                className="w-full bg-notion-panel border border-notion-border rounded-notion px-3 py-2 text-sm text-notion-text outline-none focus:border-notion-accent transition-colors placeholder-notion-muted"
-                placeholder="http://localhost:11434"
-                value={config.base_url ?? ''}
-                onChange={(e) => setConfig((c) => ({ ...c, base_url: e.target.value }))}
               />
             </label>
           )}

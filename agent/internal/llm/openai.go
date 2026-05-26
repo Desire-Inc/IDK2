@@ -14,11 +14,23 @@ type openaiProvider struct {
 	model  string
 }
 
+// NewOpenAI creates a standard OpenAI provider.
 func NewOpenAI(apiKey, model string) Provider {
 	if model == "" {
 		model = defaultGPTModel
 	}
 	return &openaiProvider{client: openai.NewClient(apiKey), model: model}
+}
+
+// NewOpenAICompatible creates a provider that speaks the OpenAI API format
+// but points to a custom base URL (e.g. Gitlawb Opengateway, Azure, etc.).
+func NewOpenAICompatible(apiKey, baseURL, model string) Provider {
+	if model == "" {
+		model = defaultGPTModel
+	}
+	cfg := openai.DefaultConfig(apiKey)
+	cfg.BaseURL = baseURL
+	return &openaiProvider{client: openai.NewClientWithConfig(cfg), model: model}
 }
 
 func (o *openaiProvider) Name() string  { return "openai" }
@@ -46,7 +58,6 @@ func (o *openaiProvider) Chat(ctx context.Context, cfg Config, messages []Messag
 		defer close(ch)
 		defer stream.Close()
 
-		// Accumulate tool call arguments per index
 		tcArgs := map[int]string{}
 		tcID   := map[int]string{}
 		tcName := map[int]string{}

@@ -1,4 +1,4 @@
-// ─── Agent Event Types ───────────────────────────────────────────────────────
+// --- Agent Event Types -------------------------------------------------------
 
 export type EventType =
   | 'thinking'
@@ -35,7 +35,7 @@ export interface ApprovalData {
   data: unknown
 }
 
-// ─── Memory Types ─────────────────────────────────────────────────────────────
+// --- Memory Types ------------------------------------------------------------
 
 export interface Message {
   role: 'user' | 'assistant' | 'tool'
@@ -50,16 +50,16 @@ export interface Thread {
   updated_at: string
 }
 
-// ─── LLM Config ───────────────────────────────────────────────────────────────
+// --- LLM Config --------------------------------------------------------------
 
 export interface LLMConfig {
-  provider: 'anthropic' | 'openai' | 'ollama'
+  provider: 'anthropic' | 'openai' | 'openai_compatible' | 'ollama'
   model: string
   api_key?: string
   base_url?: string
 }
 
-// ─── UI State ─────────────────────────────────────────────────────────────────
+// --- UI State ----------------------------------------------------------------
 
 export type AgentStatus = 'idle' | 'running' | 'waiting_approval' | 'error'
 
